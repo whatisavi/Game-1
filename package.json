@@ -1,0 +1,24 @@
+{
+  "name": "connect-four",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5173",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^5",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "vitest": "^1",
+    "@vitejs/plugin-react": "^5"
+  }
+}
