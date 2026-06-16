@@ -1,0 +1,1 @@
+Place your background music file here as `music.mp3`. Browsers may block autoplay — use the player in the UI to start playback.
