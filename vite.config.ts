@@ -7,4 +7,14 @@ import { defineConfig } from 'vite'
 // or use the official plugin that matches your Vite release.
 export default defineConfig({
 	plugins: [],
+	server: {
+		proxy: {
+			// Forward /api to a local Cloudflare Pages dev server (wrangler pages dev)
+			'/api': {
+				target: 'http://127.0.0.1:8788',
+				changeOrigin: true,
+				secure: false,
+			},
+		},
+	},
 })

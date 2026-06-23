@@ -17,5 +17,3 @@ Quick start
    npm run test
 
 Play: click the arrows above columns to drop pieces. Red (R) starts first.
-
-(No background music enabled)

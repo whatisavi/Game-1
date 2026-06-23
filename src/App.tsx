@@ -1,6 +1,6 @@
 import React from 'react'
 import Game from './components/Game'
-import AudioPlayer from './components/AudioPlayer'
+import Signup from './components/Signup'
 
 export default function App() {
   return (
@@ -9,10 +9,10 @@ export default function App() {
         <h1>Connect Four</h1>
       </header>
       <main>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div className="main-layout">
           <Game />
-          <aside style={{ width: 260 }}>
-            <AudioPlayer src="/background music. - quiet please. (128k).mp3" initialVolume={0.15} />
+          <aside className="app-sidebar" style={{ width: 320 }}>
+            <Signup />
           </aside>
         </div>
       </main>
