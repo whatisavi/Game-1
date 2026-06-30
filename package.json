@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx wrangler pages dev --d1 DB=connectfour-ev -- vite",
+    "dev": "concurrently -n vite,worker -c cyan,green \"vite\" \"wrangler dev --remote --port 8787\"",
     "build": "vite build",
     "preview": "vite preview --port 5173",
     "test": "vitest",

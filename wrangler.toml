@@ -1,4 +1,10 @@
+main = "src/worker.ts"
+compatibility_date = "2026-06-16"
 [[d1_databases]]
 binding = "DB"
 database_name = "connectfour-ev"
 database_id = "6c2ed8a5-5dd2-4661-8318-386ff92c0955"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
