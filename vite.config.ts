@@ -9,9 +9,9 @@ export default defineConfig({
 	plugins: [],
 	server: {
 		proxy: {
-			// Forward /api to a local Cloudflare Pages dev server (wrangler pages dev)
+			// Forward /api to the local Wrangler dev server used by this project.
 			'/api': {
-				target: 'http://127.0.0.1:8788',
+				target: 'http://127.0.0.1:8787',
 				changeOrigin: true,
 				secure: false,
 			},

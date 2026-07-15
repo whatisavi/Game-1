@@ -1,6 +1,7 @@
 export type Player = 'R' | 'Y'
 export type Cell = Player | null
 export type BoardState = Cell[][]
+export type Scoreboard = Record<Player | 'Draw', number>
 
 export function createEmptyBoard(rows: number, cols: number): BoardState {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => null))
@@ -52,4 +53,12 @@ export function findWinner(board: BoardState): Player | null {
     }
   }
   return null
+}
+
+export function getUpdatedScore(score: Scoreboard, result: Player | 'Draw'): Scoreboard {
+  if (result === 'Draw') return score
+  return {
+    ...score,
+    [result]: score[result] + 1,
+  }
 }

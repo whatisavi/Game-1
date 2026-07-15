@@ -1,5 +1,30 @@
 interface Env {
-  DB: any; // D1Database
+  DB: any;
+}
+
+function bufferToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(password));
+  return bufferToHex(digest);
+}
+
+async function ensurePasswordColumn(env: Env['DB']) {
+  try {
+    await env.prepare("SELECT password FROM users LIMIT 1").first();
+  } catch (error: any) {
+    const message = String(error?.message || error);
+    if (message.includes("no such column: password") || message.includes("has no column named password")) {
+      await env.prepare("ALTER TABLE users ADD COLUMN password TEXT").run();
+    } else {
+      throw error;
+    }
+  }
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -16,8 +41,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const body: any = await request.json();
     const { username, email, password } = body || {};
 
-    // Allow user to supply email or username in the "username" field or as separate fields
-    const loginIdentifier = (username || email || "").trim();
+    const loginIdentifier = String(username || email || "").trim();
 
     if (!loginIdentifier || !password) {
       return new Response(
@@ -26,20 +50,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
-    // Ensure database table exists in case signin is called first (unlikely but safe)
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT UNIQUE,
-        email TEXT UNIQUE,
-        password_hash TEXT,
-        created_at TEXT
-      )`
-    ).run();
+    await ensurePasswordColumn(env.DB);
 
-    // Query for the user by username or email
     const user: any = await env.DB.prepare(
-      "SELECT id, username, email, password_hash, created_at FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE LIMIT 1"
+      "SELECT id, username, email, password FROM users WHERE username = ?1 OR email = ?2 LIMIT 1"
     )
       .bind(loginIdentifier, loginIdentifier)
       .first();
@@ -51,14 +65,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
-    // Hash the incoming password to compare
-    const pwBuffer = new TextEncoder().encode(password);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", pwBuffer);
-    const hashHex = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    const submittedPasswordHash = await hashPassword(String(password));
 
-    if (hashHex !== user.password_hash) {
+    if (submittedPasswordHash !== user.password) {
       return new Response(
         JSON.stringify({ error: "Invalid username/email or password" }),
         { status: 401, headers: { "Content-Type": "application/json" } }
@@ -70,7 +79,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        createdAt: user.created_at,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );

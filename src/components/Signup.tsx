@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react'
 
-export default function Signup() {
+type AuthUser = {
+  id?: string
+  username: string
+  email: string
+  wins?: number
+}
+
+type SignupProps = {
+  onAuthenticated?: (user: AuthUser) => void
+}
+
+export default function Signup({ onAuthenticated }: SignupProps) {
   const [isSignUp, setIsSignUp] = useState(false) // toggle between Sign In and Sign Up
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -9,7 +20,7 @@ export default function Signup() {
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null)
   
   // Authenticated user state
-  const [user, setUser] = useState<{ username: string; email: string } | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
 
   // Load user session on mount
   useEffect(() => {
@@ -28,7 +39,7 @@ export default function Signup() {
     setMessage(null)
     setLoading(true)
 
-    const endpoint = isSignUp ? '/api/signup' : '/api/signin'
+    const endpoint = isSignUp ? '/api/signup' : '/api/signin' 
     const payload = isSignUp 
       ? { username, email, password }
       : { username: username, password } // backend signin accepts username (which acts as username or email)
@@ -40,21 +51,29 @@ export default function Signup() {
         body: JSON.stringify(payload),
       })
       
-      const data = await res.json()
+      let data: any = {}
+      try {
+        data = await res.json()
+      } catch {
+        data = {}
+      }
       
       if (!res.ok) {
-        throw new Error(data.error || `${isSignUp ? 'Signup' : 'Sign in'} failed`)
+        const message = data.error || `${isSignUp ? 'Signup' : 'Sign in'} failed`
+        throw new Error(message)
       }
 
       // Success
       if (isSignUp) {
         setMessage({ text: 'Account created successfully! Please sign in.', isError: false })
-        setIsSignUp(false) // switch to login tab
+        setIsSignUp(false)
         setPassword('')
+        setEmail('')
       } else {
-        const loggedInUser = { username: data.username, email: data.email }
+        const loggedInUser = { id: data.id, username: data.username, email: data.email, wins: data.wins ?? 0 }
         setUser(loggedInUser)
         localStorage.setItem('auth_user', JSON.stringify(loggedInUser))
+        onAuthenticated?.(loggedInUser)
         setMessage({ text: `Welcome back, ${data.username}!`, isError: false })
       }
     } catch (err: any) {
