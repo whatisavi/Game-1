@@ -123,8 +123,10 @@ export default function Game({ user }: GameProps) {
 
   return (
     <div className="game">
-      <div className="status">
-        {winner ? (winner === 'Draw' ? 'Draw!' : `${winner} wins!`) : `Turn: ${current}`}
+      <div className="game-header">
+        <div className="status">
+          {winner ? (winner === 'Draw' ? 'Draw!' : `${winner} wins!`) : `Turn: ${current}`}
+        </div>
       </div>
       <div className="scoreboard" aria-label="Scoreboard">
         <div className="score-title">Score</div>

@@ -95,6 +95,7 @@ export default {
     const isSignupRoute = (url.pathname === '/signup' || url.pathname === '/api/signup') && request.method === 'POST'
     const isSigninRoute = (url.pathname === '/signin' || url.pathname === '/api/signin') && request.method === 'POST'
     const isWinRoute = (url.pathname === '/game/win' || url.pathname === '/api/game/win') && request.method === 'POST'
+    const isLeaderboardRoute = (url.pathname === '/game/leaderboard' || url.pathname === '/api/game/leaderboard') && request.method === 'GET'
 
     if (isSignupRoute) {
       try {
@@ -191,6 +192,22 @@ export default {
         return new Response(JSON.stringify({ success: true, changed: changes > 0, wins: changes }), { status: 200 })
       } catch (err) {
         return new Response(JSON.stringify({ error: 'Invalid request', details: String(err) }), { status: 400 })
+      }
+    }
+
+    if (isLeaderboardRoute) {
+      try {
+        await ensureWinColumn(env)
+        const result = await env.DB.prepare('SELECT * FROM Users ORDER BY "win" DESC').all()
+        const rows = Array.isArray(result) ? result : Array.isArray(result?.results) ? result.results : []
+        const entries = (Array.isArray(rows) ? rows : []).map((row: any) => ({
+          id: String(row.id ?? ''),
+          username: String(row.username ?? ''),
+          win: Number(row.win ?? 0),
+        }))
+        return new Response(JSON.stringify({ entries }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      } catch (err) {
+        return new Response(JSON.stringify({ error: 'Failed to load leaderboard', details: String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       }
     }
 

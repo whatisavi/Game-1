@@ -14,6 +14,10 @@ type User = {
 export default function App() {
   const [view, setView] = useState<View>('home')
   const [user, setUser] = useState<User | null>(null)
+  const [leaderboard, setLeaderboard] = useState<Array<{ id: string; username: string; win: number }>>([])
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null)
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false)
 
   useEffect(() => {
     const savedUser = localStorage.getItem('auth_user')
@@ -38,6 +42,50 @@ export default function App() {
     setUser(null)
     localStorage.removeItem('auth_user')
     setView('home')
+  }
+
+  async function fetchLeaderboard() {
+    setLeaderboardError(null)
+    setLoadingLeaderboard(true)
+
+    try {
+      const response = await fetch('/api/game/leaderboard')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.error || 'Could not load leaderboard')
+      }
+
+      const data = await response.json()
+      const rawEntries = Array.isArray(data)
+        ? data
+        : Array.isArray(data.entries)
+          ? data.entries
+          : Array.isArray(data.results)
+            ? data.results
+            : Array.isArray(data.rows)
+              ? data.rows
+              : Array.isArray(data.data)
+                ? data.data
+                : []
+
+      setLeaderboard(rawEntries.map((entry: any) => ({
+        id: String(entry?.id ?? entry?.ID ?? ''),
+        username: String(entry?.username ?? entry?.USERNAME ?? ''),
+        win: Number(entry?.win ?? entry?.WIN ?? 0),
+      })))
+    } catch (err: any) {
+      setLeaderboardError(String(err?.message || err))
+    } finally {
+      setLoadingLeaderboard(false)
+    }
+  }
+
+  function handleToggleLeaderboard() {
+    const nextOpen = !leaderboardOpen
+    setLeaderboardOpen(nextOpen)
+    if (nextOpen && leaderboard.length === 0) {
+      void fetchLeaderboard()
+    }
   }
 
   return (
@@ -100,6 +148,33 @@ export default function App() {
                 <h3>{user?.username || 'Player'}</h3>
                 <p>{user?.email || 'Signed in and ready to play'}</p>
               </div>
+              <button className="primary-cta leaderboard-toggle-button" onClick={handleToggleLeaderboard}>
+                {leaderboardOpen ? 'Hide leaderboard' : 'Show leaderboard'}
+              </button>
+              {leaderboardOpen && (
+                <section className="leaderboard-box">
+                  <div className="leaderboard-box-header">
+                    <span>Leaderboard</span>
+                    <small>Top wins</small>
+                  </div>
+                  {loadingLeaderboard ? (
+                    <p>Loading...</p>
+                  ) : leaderboardError ? (
+                    <p className="error">{leaderboardError}</p>
+                  ) : leaderboard.length === 0 ? (
+                    <p>No entries yet.</p>
+                  ) : (
+                    <ol className="sidebar-leaderboard-list">
+                      {leaderboard.map((entry) => (
+                        <li key={entry.id}>
+                          <span>{entry.username}</span>
+                          <strong>{entry.win}</strong>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              )}
             </aside>
           </div>
         )}

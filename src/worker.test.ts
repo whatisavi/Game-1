@@ -5,8 +5,10 @@ import worker from './worker'
 class MockDb {
   users: Array<{ id: string; username: string; email: string; password: string; win?: number }> = []
   columns = ['id', 'username', 'email']
+  queries: string[] = []
 
   prepare(sql: string) {
+    this.queries.push(sql)
     if (sql.includes('CREATE TABLE')) {
       return {
         run: async () => ({})
@@ -76,6 +78,14 @@ class MockDb {
             return this.users.find((user) => user.username === loginIdentifier || user.email === loginIdentifier) || null
           }
         })
+      }
+    }
+
+    if (sql.includes('SELECT * FROM Users ORDER BY "win" DESC')) {
+      return {
+        all: async () => [...this.users]
+          .sort((a, b) => (b.win ?? 0) - (a.win ?? 0))
+          .map((entry) => ({ id: entry.id, username: entry.username, win: entry.win ?? 0 }))
       }
     }
 
@@ -158,6 +168,28 @@ describe('worker auth routes', () => {
     expect(body.success).toBe(true)
     expect(body.wins).toBe(1)
     expect(db.users[0].win).toBe(1)
+  })
+
+  it('returns leaderboard entries sorted by wins descending', async () => {
+    const db = new MockDb()
+    await db.prepare('INSERT INTO users').bind('1', 'alice', 'alice@example.com', 'hashed').run()
+    await db.prepare('INSERT INTO users').bind('2', 'bob', 'bob@example.com', 'hashed').run()
+    db.users[0].win = 4
+    db.users[1].win = 7
+
+    const request = new Request('http://localhost/api/game/leaderboard', {
+      method: 'GET',
+    })
+
+    const response = await worker.fetch(request, { DB: db as any })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(db.queries.some((sql) => sql === 'SELECT * FROM Users ORDER BY "win" DESC')).toBe(true)
+    expect(Array.isArray(body.entries)).toBe(true)
+    expect(body.entries[0].username).toBe('bob')
+    expect(body.entries[0].win).toBe(7)
+    expect(body.entries[1].username).toBe('alice')
   })
 
   it('increments a user win count using username when no id is provided', async () => {

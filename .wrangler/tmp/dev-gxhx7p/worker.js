@@ -85,6 +85,7 @@ var worker_default = {
     const isSignupRoute = (url.pathname === "/signup" || url.pathname === "/api/signup") && request.method === "POST";
     const isSigninRoute = (url.pathname === "/signin" || url.pathname === "/api/signin") && request.method === "POST";
     const isWinRoute = (url.pathname === "/game/win" || url.pathname === "/api/game/win") && request.method === "POST";
+    const isLeaderboardRoute = (url.pathname === "/game/leaderboard" || url.pathname === "/api/game/leaderboard") && request.method === "GET";
     if (isSignupRoute) {
       try {
         let body = {};
@@ -163,6 +164,21 @@ var worker_default = {
         return new Response(JSON.stringify({ error: "Invalid request", details: String(err) }), { status: 400 });
       }
     }
+    if (isLeaderboardRoute) {
+      try {
+        await ensureWinColumn(env);
+        const result = await env.DB.prepare('SELECT * FROM Users ORDER BY "win" DESC').all();
+        const rows = Array.isArray(result) ? result : Array.isArray(result?.results) ? result.results : [];
+        const entries = (Array.isArray(rows) ? rows : []).map((row) => ({
+          id: String(row.id ?? ""),
+          username: String(row.username ?? ""),
+          win: Number(row.win ?? 0)
+        }));
+        return new Response(JSON.stringify({ entries }), { status: 200, headers: { "Content-Type": "application/json" } });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "Failed to load leaderboard", details: String(err) }), { status: 500, headers: { "Content-Type": "application/json" } });
+      }
+    }
     return new Response("Not found", { status: 404 });
   }
 };
@@ -185,7 +201,7 @@ var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
 
-// .wrangler/tmp/bundle-jazyaE/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-L0jSTq/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default
 ];
@@ -216,7 +232,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-jazyaE/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-L0jSTq/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
