@@ -234,6 +234,10 @@ header h1 {
   margin: 0 0 6px;
 }
 
+.leaderboard-toggle-button {
+  margin-top: 12px;
+}
+
 .game-header {
   width: 100%;
   display: flex;
@@ -274,7 +278,7 @@ header h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 16px;
 }
 

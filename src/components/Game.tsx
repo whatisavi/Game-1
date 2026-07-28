@@ -77,26 +77,131 @@ export default function Game({ user }: GameProps) {
     return Array.from({ length: COLUMNS }, (_, index) => index).some((col) => dropInColumn(currentBoard, col, 'R') !== null)
   }
 
+  function getLegalMoves(currentBoard: BoardState): number[] {
+    return Array.from({ length: COLUMNS }, (_, index) => index).filter((col) => dropInColumn(currentBoard, col, 'Y') !== null)
+  }
+
+  function isWinningMove(currentBoard: BoardState, col: number, player: Player): boolean {
+    const next = dropInColumn(currentBoard, col, player)
+    return next ? findWinner(next) === player : false
+  }
+
+  function evaluateBoard(currentBoard: BoardState): number {
+    const scoreLine = (cells: (Player | null)[]): number => {
+      const myCount = cells.filter((cell) => cell === 'Y').length
+      const yourCount = cells.filter((cell) => cell === 'R').length
+      const emptyCount = cells.filter((cell) => cell === null).length
+
+      if (myCount > 0 && yourCount > 0) return 0
+      if (myCount === 0 && yourCount === 0) return 0
+
+      if (myCount > 0) {
+        switch (myCount) {
+          case 4:
+            return 1000
+          case 3:
+            return emptyCount === 1 ? 80 : 30
+          case 2:
+            return emptyCount === 2 ? 12 : 6
+          case 1:
+            return 1
+        }
+      }
+
+      switch (yourCount) {
+        case 4:
+          return -1000
+        case 3:
+          return emptyCount === 1 ? -80 : -28
+        case 2:
+          return emptyCount === 2 ? -10 : -4
+        case 1:
+          return -1
+      }
+
+      return 0
+    }
+
+    let score = 0
+    for (let row = 0; row < ROWS; row += 1) {
+      for (let col = 0; col < COLUMNS - 3; col += 1) {
+        score += scoreLine([
+          currentBoard[row][col],
+          currentBoard[row][col + 1],
+          currentBoard[row][col + 2],
+          currentBoard[row][col + 3],
+        ])
+      }
+    }
+
+    for (let col = 0; col < COLUMNS; col += 1) {
+      for (let row = 0; row < ROWS - 3; row += 1) {
+        score += scoreLine([
+          currentBoard[row][col],
+          currentBoard[row + 1][col],
+          currentBoard[row + 2][col],
+          currentBoard[row + 3][col],
+        ])
+      }
+    }
+
+    for (let row = 0; row < ROWS - 3; row += 1) {
+      for (let col = 0; col < COLUMNS - 3; col += 1) {
+        score += scoreLine([
+          currentBoard[row][col],
+          currentBoard[row + 1][col + 1],
+          currentBoard[row + 2][col + 2],
+          currentBoard[row + 3][col + 3],
+        ])
+      }
+    }
+
+    for (let row = 3; row < ROWS; row += 1) {
+      for (let col = 0; col < COLUMNS - 3; col += 1) {
+        score += scoreLine([
+          currentBoard[row][col],
+          currentBoard[row - 1][col + 1],
+          currentBoard[row - 2][col + 2],
+          currentBoard[row - 3][col + 3],
+        ])
+      }
+    }
+
+    return score
+  }
+
   function chooseBotMove(currentBoard: BoardState): number | null {
-    const candidateColumns = Array.from({ length: COLUMNS }, (_, index) => index).filter((col) => dropInColumn(currentBoard, col, 'R') !== null)
-    if (candidateColumns.length === 0) return null
+    const legalMoves = getLegalMoves(currentBoard)
+    if (legalMoves.length === 0) return null
 
-    const centerOrder = [3, 2, 4, 1, 5, 0, 6]
-    const orderedColumns = centerOrder.filter((col) => candidateColumns.includes(col))
+    const winningMoves = legalMoves.filter((col) => isWinningMove(currentBoard, col, 'Y'))
+    if (winningMoves.length > 0) {
+      return winningMoves[Math.floor(Math.random() * winningMoves.length)]
+    }
 
-    const botWinningMove = orderedColumns.find((col) => {
-      const next = dropInColumn(currentBoard, col, 'Y')
-      return next ? findWinner(next) === 'Y' : false
+    const blockingMoves = legalMoves.filter((col) => isWinningMove(currentBoard, col, 'R'))
+    if (blockingMoves.length > 0) {
+      return blockingMoves[Math.floor(Math.random() * blockingMoves.length)]
+    }
+
+    const scoredMoves = legalMoves.map((col) => {
+      const nextBoard = dropInColumn(currentBoard, col, 'Y')!
+      let score = evaluateBoard(nextBoard)
+      score += 6 - Math.abs(col - 3) // prefer center columns slightly
+
+      const opponentMoves = getLegalMoves(nextBoard)
+      const opponentCanWin = opponentMoves.some((oppCol) => isWinningMove(nextBoard, oppCol, 'R'))
+      if (opponentCanWin) score -= 280
+
+      const unsafeMoves = opponentMoves.filter((oppCol) => isWinningMove(dropInColumn(nextBoard, oppCol, 'R') ?? nextBoard, oppCol, 'R'))
+      if (unsafeMoves.length > 1) score -= 120
+
+      return { col, score }
     })
-    if (botWinningMove !== undefined) return botWinningMove
 
-    const playerWinningMove = orderedColumns.find((col) => {
-      const next = dropInColumn(currentBoard, col, 'R')
-      return next ? findWinner(next) === 'R' : false
-    })
-    if (playerWinningMove !== undefined) return playerWinningMove
-
-    return orderedColumns[0] ?? candidateColumns[0] ?? null
+    const highestScore = Math.max(...scoredMoves.map((move) => move.score))
+    const bestMoves = scoredMoves.filter((move) => move.score >= highestScore - 8).map((move) => move.col)
+    return bestMoves[Math.floor(Math.random() * bestMoves.length)]
   }
 
   async function reportWin() {
