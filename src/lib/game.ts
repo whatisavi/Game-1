@@ -35,6 +35,40 @@ function checkDirection(board: BoardState, startR: number, startC: number, dR: n
   return count
 }
 
+function collectDirection(board: BoardState, startR: number, startC: number, dR: number, dC: number) {
+  const player = board[startR][startC]
+  if (!player) return [] as [number, number][]
+  const cells: [number, number][] = []
+  let r = startR
+  let c = startC
+  while (r >= 0 && r < board.length && c >= 0 && c < board[0].length && board[r][c] === player) {
+    cells.push([r, c])
+    r += dR
+    c += dC
+  }
+  return cells
+}
+
+export function findWinningCells(board: BoardState): [number, number][] | null {
+  const rows = board.length
+  const cols = board[0].length
+
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      if (!board[r][c]) continue
+      const horizontal = collectDirection(board, r, c, 0, 1)
+      if (horizontal.length >= 4) return horizontal
+      const vertical = collectDirection(board, r, c, 1, 0)
+      if (vertical.length >= 4) return vertical
+      const diagDR = collectDirection(board, r, c, 1, 1)
+      if (diagDR.length >= 4) return diagDR
+      const diagUR = collectDirection(board, r, c, -1, 1)
+      if (diagUR.length >= 4) return diagUR
+    }
+  }
+  return null
+}
+
 export function findWinner(board: BoardState): Player | null {
   const rows = board.length
   const cols = board[0].length

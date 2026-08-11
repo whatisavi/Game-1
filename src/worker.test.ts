@@ -37,6 +37,12 @@ class MockDb {
       }
     }
 
+    if (sql.includes('SELECT 1 FROM users')) {
+      return {
+        first: async () => this.users[0] || null
+      }
+    }
+
     if (sql.includes('SELECT password FROM users')) {
       return {
         first: async () => this.users[0] || null
@@ -81,7 +87,7 @@ class MockDb {
       }
     }
 
-    if (sql.includes('SELECT * FROM Users ORDER BY "win" DESC')) {
+    if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC') || sql.includes('SELECT * FROM Users ORDER BY "win" DESC')) {
       return {
         all: async () => [...this.users]
           .sort((a, b) => (b.win ?? 0) - (a.win ?? 0))
@@ -185,11 +191,65 @@ describe('worker auth routes', () => {
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(db.queries.some((sql) => sql === 'SELECT * FROM Users ORDER BY "win" DESC')).toBe(true)
+    expect(db.queries.some((sql) => sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC'))).toBe(true)
     expect(Array.isArray(body.entries)).toBe(true)
     expect(body.entries[0].username).toBe('bob')
     expect(body.entries[0].win).toBe(7)
     expect(body.entries[1].username).toBe('alice')
+  })
+
+  it('creates the users table and returns an empty leaderboard when the database is new', async () => {
+    const db = {
+      queries: [] as string[],
+      tableExists: false,
+      prepare(sql: string) {
+        this.queries.push(sql)
+
+        if (sql.includes('CREATE TABLE users')) {
+          this.tableExists = true
+          return {
+            run: async () => ({})
+          }
+        }
+
+        if (sql.includes('SELECT win FROM users') || sql.includes('SELECT password FROM users') || sql.includes('SELECT 1 FROM users')) {
+          if (!this.tableExists) {
+            return {
+              first: async () => {
+                throw new Error('no such table: users')
+              }
+            }
+          }
+          return {
+            first: async () => null
+          }
+        }
+
+        if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC')) {
+          return {
+            all: async () => ({ results: [] })
+          }
+        }
+
+        return {
+          bind: () => ({
+            run: async () => ({})
+          })
+        }
+      }
+    }
+
+    const request = new Request('http://localhost/api/game/leaderboard', {
+      method: 'GET',
+    })
+
+    const response = await worker.fetch(request, { DB: db as any })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(Array.isArray(body.entries)).toBe(true)
+    expect(body.entries).toEqual([])
+    expect(db.queries.some((sql) => sql.includes('CREATE TABLE users'))).toBe(true)
   })
 
   it('increments a user win count using username when no id is provided', async () => {

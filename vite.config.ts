@@ -8,6 +8,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
 	plugins: [],
 	server: {
+		host: '127.0.0.1',
+		port: 5173,
+		strictPort: true,
 		proxy: {
 			// Forward /api to the local Wrangler dev server used by this project.
 			'/api': {

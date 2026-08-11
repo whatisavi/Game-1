@@ -11,6 +11,7 @@
     "deploy": "npm run build && npx wrangler pages deploy dist"
   },
   "dependencies": {
+    "motion": "^12.43.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },

@@ -9,7 +9,29 @@ async function hashPassword(password: string): Promise<string> {
     .join('')
 }
 
+async function ensureUsersTable(env: any) {
+  try {
+    await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first()
+  } catch (error: any) {
+    const message = String(error?.message || error)
+    if (message.includes('no such table: users') || message.includes('has no table named users') || message.includes('no such table')) {
+      await env.DB.prepare(`
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          email TEXT NOT NULL UNIQUE,
+          password TEXT,
+          win INTEGER DEFAULT 0
+        )
+      `).run()
+      return
+    }
+    throw error
+  }
+}
+
 async function ensurePasswordColumn(env: any) {
+  await ensureUsersTable(env)
   try {
     await env.DB.prepare('SELECT password FROM users LIMIT 1').first()
   } catch (error: any) {
@@ -23,6 +45,7 @@ async function ensurePasswordColumn(env: any) {
 }
 
 async function ensureWinColumn(env: any) {
+  await ensureUsersTable(env)
   try {
     await env.DB.prepare('SELECT win FROM users LIMIT 1').first()
   } catch (error: any) {
@@ -36,6 +59,7 @@ async function ensureWinColumn(env: any) {
 }
 
 async function incrementUserWin(env: any, userId: string | null, username?: string) {
+  await ensureUsersTable(env)
   await ensureWinColumn(env)
 
   const target = String(userId || '').trim()
@@ -55,6 +79,7 @@ async function incrementUserWin(env: any, userId: string | null, username?: stri
 }
 
 async function insertUser(env: any, username: string, email: string, passwordHash: string) {
+  await ensureUsersTable(env)
   await ensurePasswordColumn(env)
   await ensureWinColumn(env)
 
@@ -99,6 +124,7 @@ export default {
 
     if (isSignupRoute) {
       try {
+        await ensureUsersTable(env)
         let body: any = {}
         try {
           body = await request.json()
@@ -133,6 +159,7 @@ export default {
 
     if (isSigninRoute) {
       try {
+        await ensureUsersTable(env)
         let body: any = {}
         try {
           body = await request.json()
@@ -173,6 +200,7 @@ export default {
 
     if (isWinRoute) {
       try {
+        await ensureUsersTable(env)
         let body: any = {}
         try {
           body = await request.json()
@@ -197,8 +225,9 @@ export default {
 
     if (isLeaderboardRoute) {
       try {
+        await ensureUsersTable(env)
         await ensureWinColumn(env)
-        const result = await env.DB.prepare('SELECT * FROM Users ORDER BY "win" DESC').all()
+        const result = await env.DB.prepare('SELECT id, username, email, win FROM users ORDER BY win DESC').all()
         const rows = Array.isArray(result) ? result : Array.isArray(result?.results) ? result.results : []
         const entries = (Array.isArray(rows) ? rows : []).map((row: any) => ({
           id: String(row.id ?? ''),
