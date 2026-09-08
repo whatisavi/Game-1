@@ -21,7 +21,8 @@ async function ensureUsersTable(env: any) {
           username TEXT NOT NULL UNIQUE,
           email TEXT NOT NULL UNIQUE,
           password TEXT,
-          win INTEGER DEFAULT 0
+          win INTEGER DEFAULT 0,
+          win_1v1v1 INTEGER DEFAULT 0
         )
       `).run()
       return
@@ -58,20 +59,36 @@ async function ensureWinColumn(env: any) {
   }
 }
 
-async function incrementUserWin(env: any, userId: string | null, username?: string) {
+async function ensureTripleWinColumn(env: any) {
   await ensureUsersTable(env)
-  await ensureWinColumn(env)
+  try {
+    await env.DB.prepare('SELECT win_1v1v1 FROM users LIMIT 1').first()
+  } catch (error: any) {
+    const message = String(error?.message || error)
+    if (message.includes('no such column: win_1v1v1') || message.includes('has no column named win_1v1v1')) {
+      await env.DB.prepare('ALTER TABLE users ADD COLUMN win_1v1v1 INTEGER DEFAULT 0').run()
+    } else {
+      throw error
+    }
+  }
+}
+
+async function incrementUserWin(env: any, userId: string | null, username?: string, mode: 'classic' | 'triple' = 'classic') {
+  await ensureUsersTable(env)
+  const column = mode === 'triple' ? 'win_1v1v1' : 'win'
+  if (mode === 'triple') await ensureTripleWinColumn(env)
+  else await ensureWinColumn(env)
 
   const target = String(userId || '').trim()
   const loginIdentifier = String(username || '').trim()
 
   if (target) {
-    const result = await env.DB.prepare('UPDATE users SET win = win + 1 WHERE id = ?').bind(target).run()
+    const result = await env.DB.prepare(`UPDATE users SET ${column} = ${column} + 1 WHERE id = ?`).bind(target).run()
     return Number(result?.meta?.changes ?? 0)
   }
 
   if (loginIdentifier) {
-    const result = await env.DB.prepare('UPDATE users SET win = win + 1 WHERE username = ? OR email = ?').bind(loginIdentifier, loginIdentifier).run()
+    const result = await env.DB.prepare(`UPDATE users SET ${column} = ${column} + 1 WHERE username = ? OR email = ?`).bind(loginIdentifier, loginIdentifier).run()
     return Number(result?.meta?.changes ?? 0)
   }
 
@@ -82,11 +99,12 @@ async function insertUser(env: any, username: string, email: string, passwordHas
   await ensureUsersTable(env)
   await ensurePasswordColumn(env)
   await ensureWinColumn(env)
+  await ensureTripleWinColumn(env)
 
   try {
     const result = await env.DB.prepare(
-      `INSERT INTO users (username, email, password, win)
-       VALUES (?, ?, ?, 0)`
+      `INSERT INTO users (username, email, password, win, win_1v1v1)
+       VALUES (?, ?, ?, 0, 0)`
     ).bind(username, email, passwordHash).run()
 
     return Number(result?.meta?.last_row_id ?? result?.last_row_id ?? 0)
@@ -100,8 +118,8 @@ async function insertUser(env: any, username: string, email: string, passwordHas
         // Ignore if the column already exists.
       }
       const result = await env.DB.prepare(
-        `INSERT INTO users (username, email, password, win)
-         VALUES (?, ?, ?, 0)`
+        `INSERT INTO users (username, email, password, win, win_1v1v1)
+         VALUES (?, ?, ?, 0, 0)`
       ).bind(username, email, passwordHash).run()
       return Number(result?.meta?.last_row_id ?? result?.last_row_id ?? 0)
     }
@@ -211,12 +229,13 @@ export default {
         const userId = String(body?.userId || '').trim()
         const username = String(body?.username || '').trim()
         const email = String(body?.email || '').trim()
+          const mode = body?.mode === 'triple' ? 'triple' : 'classic'
 
         if (!userId && !username && !email) {
           return new Response(JSON.stringify({ error: 'Missing user identifier' }), { status: 400 })
         }
 
-        const changes = await incrementUserWin(env, userId || null, username || email || undefined)
+        const changes = await incrementUserWin(env, userId || null, username || email || undefined, mode)
         return new Response(JSON.stringify({ success: true, changed: changes > 0, wins: changes }), { status: 200 })
       } catch (err) {
         return new Response(JSON.stringify({ error: 'Invalid request', details: String(err) }), { status: 400 })
@@ -226,13 +245,16 @@ export default {
     if (isLeaderboardRoute) {
       try {
         await ensureUsersTable(env)
-        await ensureWinColumn(env)
-        const result = await env.DB.prepare('SELECT id, username, email, win FROM users ORDER BY win DESC').all()
+        const mode = url.searchParams.get('mode') === 'triple' ? 'triple' : 'classic'
+        const column = mode === 'triple' ? 'win_1v1v1' : 'win'
+        if (mode === 'triple') await ensureTripleWinColumn(env)
+        else await ensureWinColumn(env)
+        const result = await env.DB.prepare(`SELECT id, username, email, ${column} FROM users ORDER BY ${column} DESC`).all()
         const rows = Array.isArray(result) ? result : Array.isArray(result?.results) ? result.results : []
         const entries = (Array.isArray(rows) ? rows : []).map((row: any) => ({
           id: String(row.id ?? ''),
           username: String(row.username ?? ''),
-          win: Number(row.win ?? 0),
+          win: Number(row[column] ?? 0),
         }))
         return new Response(JSON.stringify({ entries }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       } catch (err) {

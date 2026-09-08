@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import worker from './worker'
 
 class MockDb {
-  users: Array<{ id: string; username: string; email: string; password: string; win?: number }> = []
-  columns = ['id', 'username', 'email']
+  users: Array<{ id: string; username: string; email: string; password: string; win?: number; win_1v1v1?: number }> = []
+  columns = ['id', 'username', 'email', 'win_1v1v1']
   queries: string[] = []
 
   prepare(sql: string) {
@@ -31,6 +31,7 @@ class MockDb {
               email: values[2],
               password: values[3],
               win: 0,
+              win_1v1v1: 0,
             })
           }
         })
@@ -52,6 +53,29 @@ class MockDb {
     if (sql.includes('SELECT win FROM users')) {
       return {
         first: async () => this.users[0] || null
+      }
+    }
+
+    if (sql.includes('SELECT win_1v1v1 FROM users')) {
+      return {
+        first: async () => this.users[0] || null
+      }
+    }
+
+    if (sql.includes('UPDATE users SET win_1v1v1')) {
+      return {
+        bind: (...values: string[]) => ({
+          run: async () => {
+            const [firstValue, secondValue] = values
+            const user = this.users.find((entry) => entry.id === firstValue || entry.username === firstValue || entry.email === firstValue)
+            if (user) user.win_1v1v1 = (user.win_1v1v1 ?? 0) + 1
+            if (!user && secondValue) {
+              const fallbackUser = this.users.find((entry) => entry.username === secondValue || entry.email === secondValue)
+              if (fallbackUser) fallbackUser.win_1v1v1 = (fallbackUser.win_1v1v1 ?? 0) + 1
+            }
+            return { meta: { changes: user ? 1 : 0 } }
+          }
+        })
       }
     }
 
@@ -87,11 +111,16 @@ class MockDb {
       }
     }
 
-    if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC') || sql.includes('SELECT * FROM Users ORDER BY "win" DESC')) {
+    if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC') || sql.includes('SELECT id, username, email, win_1v1v1 FROM users ORDER BY win_1v1v1 DESC') || sql.includes('SELECT * FROM Users ORDER BY "win" DESC')) {
       return {
         all: async () => [...this.users]
-          .sort((a, b) => (b.win ?? 0) - (a.win ?? 0))
-          .map((entry) => ({ id: entry.id, username: entry.username, win: entry.win ?? 0 }))
+          .sort((a, b) => {
+            const field = sql.includes('win_1v1v1') ? 'win_1v1v1' : 'win'
+            return (b[field] ?? 0) - (a[field] ?? 0)
+          })
+          .map((entry) => sql.includes('win_1v1v1')
+            ? { id: entry.id, username: entry.username, win_1v1v1: entry.win_1v1v1 ?? 0 }
+            : { id: entry.id, username: entry.username, win: entry.win ?? 0 })
       }
     }
 
@@ -176,6 +205,22 @@ describe('worker auth routes', () => {
     expect(db.users[0].win).toBe(1)
   })
 
+  it('increments only the 1v1v1 win count for triple mode', async () => {
+    const db = new MockDb()
+    await db.prepare('INSERT INTO users').bind('1', 'alice', 'alice@example.com', 'hashed').run()
+
+    const request = new Request('http://localhost/api/game/win', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: '1', mode: 'triple' }),
+    })
+
+    const response = await worker.fetch(request, { DB: db as any })
+    expect(response.status).toBe(200)
+    expect(db.users[0].win).toBe(0)
+    expect(db.users[0].win_1v1v1).toBe(1)
+  })
+
   it('returns leaderboard entries sorted by wins descending', async () => {
     const db = new MockDb()
     await db.prepare('INSERT INTO users').bind('1', 'alice', 'alice@example.com', 'hashed').run()
@@ -198,6 +243,22 @@ describe('worker auth routes', () => {
     expect(body.entries[1].username).toBe('alice')
   })
 
+  it('returns a separate 1v1v1 leaderboard sorted by win_1v1v1', async () => {
+    const db = new MockDb()
+    await db.prepare('INSERT INTO users').bind('1', 'alice', 'alice@example.com', 'hashed').run()
+    await db.prepare('INSERT INTO users').bind('2', 'bob', 'bob@example.com', 'hashed').run()
+    db.users[0].win = 20
+    db.users[0].win_1v1v1 = 2
+    db.users[1].win = 1
+    db.users[1].win_1v1v1 = 5
+
+    const response = await worker.fetch(new Request('http://localhost/api/game/leaderboard?mode=triple'), { DB: db as any })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.entries[0]).toEqual({ id: '2', username: 'bob', win: 5 })
+  })
+
   it('creates the users table and returns an empty leaderboard when the database is new', async () => {
     const db = {
       queries: [] as string[],
@@ -212,7 +273,7 @@ describe('worker auth routes', () => {
           }
         }
 
-        if (sql.includes('SELECT win FROM users') || sql.includes('SELECT password FROM users') || sql.includes('SELECT 1 FROM users')) {
+        if (sql.includes('SELECT win FROM users') || sql.includes('SELECT win_1v1v1 FROM users') || sql.includes('SELECT password FROM users') || sql.includes('SELECT 1 FROM users')) {
           if (!this.tableExists) {
             return {
               first: async () => {
@@ -225,7 +286,7 @@ describe('worker auth routes', () => {
           }
         }
 
-        if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC')) {
+        if (sql.includes('SELECT id, username, email, win FROM users ORDER BY win DESC') || sql.includes('SELECT id, username, email, win_1v1v1 FROM users ORDER BY win_1v1v1 DESC')) {
           return {
             all: async () => ({ results: [] })
           }

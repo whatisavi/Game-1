@@ -1,4 +1,4 @@
-export type Player = 'R' | 'Y'
+export type Player = 'R' | 'Y' | 'B'
 export type Cell = Player | null
 export type BoardState = Cell[][]
 export type Scoreboard = Record<Player | 'Draw', number>
@@ -12,7 +12,7 @@ export function dropInColumn(board: BoardState, col: number, player: Player): Bo
   const cols = board[0].length
   if (col < 0 || col >= cols) return null
   const newBoard = board.map(row => row.slice())
-  for (let r = 0; r < rows; r++) {
+  for (let r = rows - 1; r >= 0; r--) {
     if (!newBoard[r][col]) {
       newBoard[r][col] = player
       return newBoard
@@ -95,4 +95,39 @@ export function getUpdatedScore(score: Scoreboard, result: Player | 'Draw'): Sco
     ...score,
     [result]: score[result] + 1,
   }
+}
+
+export function getDropRow(board: BoardState, col: number): number | undefined {
+  const rows = board.length
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    if (!board[row][col]) return row
+  }
+  return undefined
+}
+
+export function hasStealablePiece(board: BoardState): boolean {
+  return board.some((row) => row.some((cell) => cell !== null && cell !== 'R'))
+}
+
+export function removePieceAndGravity(board: BoardState, row: number, col: number): BoardState {
+  const nextBoard = board.map((currentRow) => currentRow.slice())
+  if (row < 0 || row >= nextBoard.length || col < 0 || col >= nextBoard[0].length) {
+    return nextBoard
+  }
+
+  if (nextBoard[row][col] === null) {
+    return nextBoard
+  }
+
+  if (row === 0) {
+    nextBoard[0][col] = null
+    return nextBoard
+  }
+
+  for (let r = row - 1; r >= 0; r -= 1) {
+    nextBoard[r + 1][col] = nextBoard[r][col]
+  }
+  nextBoard[0][col] = null
+
+  return nextBoard
 }

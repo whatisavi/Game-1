@@ -1,25 +1,41 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { animate } from 'motion'
-import { createEmptyBoard, dropInColumn, findWinner, findWinningCells, getUpdatedScore, BoardState, Player, Scoreboard } from '../lib/game'
-
-const COLUMNS = 7
-const ROWS = 6
+import { createEmptyBoard, dropInColumn, findWinner, findWinningCells, getUpdatedScore, removePieceAndGravity, getDropRow, hasStealablePiece, BoardState, Player, Scoreboard } from '../lib/game'
 
 type GameProps = {
   user?: { id?: string; username?: string; email?: string; wins?: number }
 }
 
+const confettiPieces = Array.from({ length: 72 }, (_, index) => ({
+  left: `${(index * 37) % 100}%`,
+  delay: `${(index % 8) * 0.06}s`,
+  duration: `${2.1 + (index % 4) * 0.12}s`,
+  color: ['#ff5252', '#ffd24d', '#38b2ac', '#4db8f2', '#ffffff'][index % 5],
+  rotation: `${(index % 2 ? 1 : -1) * (18 + (index % 5) * 12)}deg`,
+}))
+
+type GameMode = 'classic' | 'triple' | 'stealing'
+type Difficulty = 'easy' | 'medium' | 'hard' | 'nightmare'
+
 export default function Game({ user }: GameProps) {
+  const [mode, setMode] = useState<GameMode>('classic')
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium')
+  const [stealAvailable, setStealAvailable] = useState<boolean>(false)
+  const [stealFlash, setStealFlash] = useState<boolean>(false)
+  const [stealBannerText, setStealBannerText] = useState<string>('STEAL')
+  const rows = mode === 'triple' ? 7 : 6
+  const columns = mode === 'triple' ? 9 : 7
   const boardRef = useRef<HTMLDivElement | null>(null)
   const dropElementRef = useRef<HTMLDivElement | null>(null)
-  const [board, setBoard] = useState<BoardState>(() => createEmptyBoard(ROWS, COLUMNS))
+  const [board, setBoard] = useState<BoardState>(() => createEmptyBoard(rows, columns))
   const [current, setCurrent] = useState<Player>('R')
   const [winner, setWinner] = useState<Player | 'Draw' | null>(null)
-  const [score, setScore] = useState<Scoreboard>({ R: 0, Y: 0, Draw: 0 })
+  const [score, setScore] = useState<Scoreboard>({ R: 0, Y: 0, B: 0, Draw: 0 })
   const [lastDrop, setLastDrop] = useState<{ col: number; row: number; player: Player } | null>(null)
   const [winningCells, setWinningCells] = useState<Array<{ row: number; col: number }>>([])
   const [lastDropSource, setLastDropSource] = useState<'user' | 'bot' | null>(null)
-  const [pendingDrop, setPendingDrop] = useState<{ col: number; row: number; player: Player; nextBoard: BoardState } | null>(null)
+  const [stealFallingCells, setStealFallingCells] = useState<Array<{ fromRow: number; toRow: number; col: number }>>([])
+  const [pendingDrop, setPendingDrop] = useState<{ col: number; row: number; player: Player; nextBoard: BoardState; source: 'user' | 'bot' } | null>(null)
   const meltOverlayRef = useRef<HTMLDivElement | null>(null)
   const laserRef = useRef<HTMLDivElement | null>(null)
   const moltenSvgRef = useRef<SVGSVGElement | null>(null)
@@ -29,19 +45,77 @@ export default function Game({ user }: GameProps) {
   const whooshAudioRef = useRef<HTMLAudioElement | null>(null)
   const [sfxVolume, setSfxVolume] = useState<number>(0.9)
   const [sfxMuted, setSfxMuted] = useState<boolean>(false)
+  const botMoveHistoryRef = useRef<Record<Player, number[]>>({ R: [], Y: [], B: [] })
+  const openingCursorRef = useRef(0)
 
   function handleDrop(col: number) {
     if (winner || current !== 'R' || pendingDrop) return
 
-    const dropRow = board.findIndex((row) => row[col] === null)
-    const next = dropInColumn(board, col, current)
-    if (!next || dropRow === -1) return
+    if (mode === 'stealing' && stealAvailable) {
+      setStealAvailable(false)
+      setStealFlash(false)
+      setStealBannerText('STEAL')
+    }
 
-    setPendingDrop({ col, row: dropRow, player: current, nextBoard: next })
+    const dropRow = getDropRow(board, col)
+    const next = dropInColumn(board, col, current)
+    if (!next || dropRow === undefined) return
+
+    setPendingDrop({ col, row: dropRow, player: current, nextBoard: next, source: 'user' })
+  }
+
+  function handleCellClick(row: number, col: number) {
+    if (mode === 'stealing' && stealAvailable) {
+      handleSteal(row, col)
+    }
+  }
+
+  function handleSteal(row: number, col: number) {
+    if (winner || current !== 'R' || pendingDrop || mode !== 'stealing' || !stealAvailable) return
+
+    const cell = board[row]?.[col]
+    if (!cell || cell === 'R') return
+
+    const movingCells = [] as Array<{ fromRow: number; toRow: number; col: number }>
+    for (let r = row - 1; r >= 0; r -= 1) {
+      if (board[r][col]) {
+        movingCells.push({ fromRow: r, toRow: r + 1, col })
+      }
+    }
+
+    const nextBoard = removePieceAndGravity(board, row, col)
+    setBoard(nextBoard)
+    setStealAvailable(false)
+    setStealFlash(false)
+    setStealBannerText('STEAL')
+    setLastDrop(null)
+    setLastDropSource(null)
+    setStealFallingCells(movingCells)
+    setCurrent('R')
+
+    window.setTimeout(() => setStealFallingCells([]), 450)
+  }
+
+  function changeMode(nextMode: GameMode) {
+    const nextRows = nextMode === 'triple' ? 7 : 6
+    const nextCols = nextMode === 'triple' ? 9 : 7
+
+    setMode(nextMode)
+    setBoard(createEmptyBoard(nextRows, nextCols))
+    setCurrent('R')
+    setWinner(null)
+    setScore({ R: 0, Y: 0, B: 0, Draw: 0 })
+    setLastDrop(null)
+    setWinningCells([])
+    setPendingDrop(null)
+    setLastDropSource(null)
+    setStealAvailable(false)
+    setStealFlash(false)
+    setStealFallingCells([])
+    botMoveHistoryRef.current = { R: [], Y: [], B: [] }
   }
 
   useEffect(() => {
-    // prepare click/pop audio - try same-origin first, then fall back to Vite dev server
     ;(async () => {
       try {
         const trySrc = async (src: string) => {
@@ -70,7 +144,6 @@ export default function Game({ user }: GameProps) {
           popAudioRef.current = null
         }
 
-        // try whoosh sound for molten bar
         const localWhoosh = '/whoosh.mp3'
         let whooshSrc: string | null = null
         if (await trySrc(localWhoosh)) {
@@ -109,7 +182,9 @@ export default function Game({ user }: GameProps) {
     const startTop = -startSize - 16
     const endLeft = targetRect.left - boardRect.left + (targetRect.width - endSize) / 2
     const endTop = targetRect.top - boardRect.top + (targetRect.height - endSize) / 2
-    const startColor = pendingDrop.player === 'R' ? 'rgba(255, 82, 82, 0.9)' : 'rgba(255, 210, 77, 0.92)'
+    const startColor = pendingDrop.player === 'R'
+      ? 'rgba(255, 82, 82, 0.9)'
+      : 'rgba(255, 210, 77, 0.92)'
     const endColor = pendingDrop.player === 'R'
       ? 'radial-gradient(circle at 30% 30%, #ffb5b5 0%, #ff3b3b 52%, #c70000 100%)'
       : 'radial-gradient(circle at 30% 30%, #fff8b8 0%, #ffd845 52%, #d69d00 100%)'
@@ -119,10 +194,8 @@ export default function Game({ user }: GameProps) {
     droplet.style.top = `${startTop}px`
     droplet.style.width = `${startSize}px`
     droplet.style.height = `${startSize}px`
-    // start as a teardrop-ish shape (show 💧 emoji), then morph to a circle
     droplet.style.borderRadius = '50% 50% 50% 50% / 60% 60% 40% 40%'
     droplet.style.background = startColor
-    // initial teardrop rotation + shape
     droplet.style.transform = 'rotate(18deg)'
     droplet.style.boxShadow = '0 24px 46px rgba(0, 0, 0, 0.16)'
 
@@ -139,7 +212,6 @@ export default function Game({ user }: GameProps) {
       duration: 0.55,
       easing: 'ease-out',
       onComplete: () => {
-        // play pop sound for user drop
         try {
           const s = popAudioRef.current
           if (s) {
@@ -147,21 +219,22 @@ export default function Game({ user }: GameProps) {
             void s.play().catch(() => {})
           }
         } catch {}
-        // clear emoji, hide overlay and commit board
         droplet.style.opacity = '0'
         droplet.textContent = ''
         setBoard(pendingDrop.nextBoard)
         setLastDrop({ col: pendingDrop.col, row: pendingDrop.row, player: pendingDrop.player })
-        setLastDropSource('user')
+        setLastDropSource(pendingDrop.source)
         setPendingDrop(null)
-        handlePostUserMove(pendingDrop.nextBoard)
+        if (pendingDrop.source === 'user') {
+          handlePostUserMove(pendingDrop.nextBoard)
+        } else {
+          handleBotMoveOutcome(pendingDrop.nextBoard, pendingDrop.player)
+        }
       },
     })
-    // ensure no stray text
     droplet.textContent = ''
   }, [pendingDrop])
 
-  // Laser melt animation when a winner is set
   useEffect(() => {
     if (!winner || !boardRef.current || !meltOverlayRef.current || winningCells.length === 0) return
 
@@ -171,7 +244,6 @@ export default function Game({ user }: GameProps) {
     const moltenSvg = moltenSvgRef.current!
     const molten = moltenRef.current!
 
-    // compute bounding box and exact centers for winning cells relative to board
     const boardRect = boardElement.getBoundingClientRect()
     const cellElements: HTMLElement[] = []
     for (const { row, col } of winningCells) {
@@ -180,7 +252,6 @@ export default function Game({ user }: GameProps) {
     }
     if (cellElements.length === 0) return
 
-    // compute centers and find the two farthest apart cells to determine angle and length
     const centers = cellElements.map((el) => {
       const r = el.getBoundingClientRect()
       return { x: r.left - boardRect.left + r.width / 2, y: r.top - boardRect.top + r.height / 2, w: r.width, h: r.height }
@@ -211,38 +282,27 @@ export default function Game({ user }: GameProps) {
     const uy = dy / distance
     const angle = Math.atan2(dy, dx) * (180 / Math.PI)
 
-    // project each center onto the line direction and expand by token radius
     const projs = centers.map((c) => c.x * ux + c.y * uy)
     const tokenRadius = Math.max(...centers.map(c => Math.max(c.w, c.h))) / 2
     const lows = projs.map(p => p - tokenRadius)
     const highs = projs.map(p => p + tokenRadius)
     const minProj = Math.min(...lows)
     const maxProj = Math.max(...highs)
-    const length = maxProj - minProj // span outer edges of tokens along the line
+    const length = maxProj - minProj
 
-    // compute exact center point as midpoint between farthest cell centers (pixel coords)
     const centerX = (A.x + B.x) / 2
     const centerY = (A.y + B.y) / 2
 
-    // position overlay to cover the whole board so clones can use board-local coords
-    const minLeft = Math.min(...centers.map(c => c.x - c.w / 2))
-    const minTop = Math.min(...centers.map(c => c.y - c.h / 2))
-    const maxRight = Math.max(...centers.map(c => c.x + c.w / 2))
-    const maxBottom = Math.max(...centers.map(c => c.y + c.h / 2))
-    const width = maxRight - minLeft
-    const height = maxBottom - minTop
-
     overlay.style.display = 'block'
-    overlay.style.left = `0px`
-    overlay.style.top = `0px`
+    overlay.style.left = '0px'
+    overlay.style.top = '0px'
     overlay.style.width = `${boardRect.width}px`
     overlay.style.height = `${boardRect.height}px`
     overlay.style.pointerEvents = 'none'
 
-    // prepare laser and molten bar oriented along the line between farthest cells
     laser.style.opacity = '0'
     laser.style.width = `${length}px`
-    laser.style.height = `6px`
+    laser.style.height = '6px'
     laser.style.left = `${centerX}px`
     laser.style.top = `${centerY}px`
     laser.style.transform = `translate(-50%, -50%) rotate(${angle}deg) scaleX(0.08)`
@@ -250,25 +310,19 @@ export default function Game({ user }: GameProps) {
     laser.style.background = 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.95) 45%, rgba(255,255,255,0.05) 70%, rgba(255,255,255,0) 100%)'
     laser.style.boxShadow = '0 0 18px rgba(255,255,255,0.9)'
 
-    // position and size the SVG container; start a bit shorter then expand
     moltenSvg.style.opacity = '0'
     moltenSvg.style.width = `${length}px`
-    moltenSvg.style.height = `28px`
+    moltenSvg.style.height = '28px'
     moltenSvg.style.left = `${centerX}px`
     moltenSvg.style.top = `${centerY}px`
     moltenSvg.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
     moltenSvg.style.transformOrigin = 'center center'
-    // configure rect: use percentage sizing inside SVG; set fill and filter
     molten.setAttribute('fill', winner === 'R' ? 'url(#moltenGradR)' : 'url(#moltenGradY)')
     molten.setAttribute('filter', 'url(#moltenGlow)')
 
-    // animate laser in, sweep, melt pieces, then expand molten bar
-    // step 1: flash beam
     animate(laser, { opacity: [0, 1, 0.95], transform: [`translate(-50%, -50%) rotate(${angle}deg) scaleX(0.08)`, `translate(-50%, -50%) rotate(${angle}deg) scaleX(1.02)`] }, { duration: 0.36, easing: 'ease-in' })
 
-    // step 2: subtle shimmer across beam then melt
     setTimeout(() => {
-      // instead of animating originals, clone each cell into overlay and animate clones
       const clones: HTMLElement[] = []
       const layer = cloneLayerRef.current ?? overlay
       for (const el of cellElements) {
@@ -286,7 +340,6 @@ export default function Game({ user }: GameProps) {
         clones.push(clone)
       }
 
-      // animate clones to shrink and fade
       for (const clone of clones) {
         animate(clone, {
           transform: ['scale(1)', 'scale(0.6) translateY(6px)'],
@@ -295,8 +348,6 @@ export default function Game({ user }: GameProps) {
         }, { duration: 0.65, easing: 'ease-in' })
       }
 
-      // show molten bar (animate svg container opacity and then expand height)
-      // play whoosh when the bar appears
       try {
         const w = whooshAudioRef.current
         if (w) {
@@ -305,7 +356,6 @@ export default function Game({ user }: GameProps) {
         }
       } catch {}
       animate(moltenSvg, { opacity: [0, 1] }, { duration: 0.35, easing: 'ease-out' })
-      // expand the svg and rect to final height
       setTimeout(() => {
         moltenSvg.style.height = '44px'
         molten.setAttribute('height', '44')
@@ -313,19 +363,16 @@ export default function Game({ user }: GameProps) {
         molten.setAttribute('ry', '22')
       }, 160)
 
-      // remove clones after animation
       setTimeout(() => {
         const layer = cloneLayerRef.current ?? overlay
         layer.innerHTML = ''
       }, 850)
 
-      // small glow pulse (animate svg container shadow)
       setTimeout(() => {
         animate(moltenSvg, { boxShadow: ['0 22px 80px rgba(255,140,0,0.32)', '0 34px 120px rgba(255,140,0,0.44)'] }, { duration: 0.9, direction: 'alternate', repeat: 1 })
       }, 640)
     }, 220)
 
-    // cleanup: leave molten for a bit, then hide overlay after delay
     const cleanupTimer = setTimeout(() => {
       animate(moltenSvg, { opacity: [1, 0.0] }, { duration: 0.6, easing: 'ease-in' })
       animate(laser, { opacity: [0.95, 0] }, { duration: 0.4 })
@@ -340,12 +387,12 @@ export default function Game({ user }: GameProps) {
   }, [winner, winningCells])
 
   useEffect(() => {
-    return () => {
-      // nothing to cleanup for emoji timers any more
-    }
-  }, [])
+    if (!stealFlash) return
 
-  // Load saved SFX prefs and persist changes
+    const timer = window.setTimeout(() => setStealFlash(false), 3000)
+    return () => window.clearTimeout(timer)
+  }, [stealFlash])
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('sfxVolume')
@@ -365,7 +412,6 @@ export default function Game({ user }: GameProps) {
     } catch {}
   }, [sfxVolume, sfxMuted])
 
-  // apply effective volume to preloaded audio elements
   useEffect(() => {
     const effective = sfxMuted ? 0 : Math.min(1, Math.max(0, sfxVolume))
     try {
@@ -382,9 +428,7 @@ export default function Game({ user }: GameProps) {
       setWinner(w)
       setWinningCells(findWinningCells(nextBoard)?.map(([row, col]) => ({ row, col })) ?? [])
       setScore(prev => getUpdatedScore(prev, w))
-      if (w === 'R') {
-        void reportWin()
-      }
+      if (w === 'R') void reportWin()
       return
     }
 
@@ -394,27 +438,63 @@ export default function Game({ user }: GameProps) {
       return
     }
 
+    if (mode === 'stealing' && hasStealablePiece(nextBoard)) {
+      const canSteal = Math.random() < 0.18
+      if (canSteal) {
+        setLastDrop(null)
+        setLastDropSource(null)
+        setStealAvailable(true)
+        setStealFlash(true)
+        setStealBannerText('STEAL')
+        setCurrent('R')
+        return
+      }
+    }
+
+    if (mode === 'triple') {
+      setCurrent('Y')
+      setTimeout(() => runTripleBot(nextBoard, 'Y'), 350)
+      return
+    }
+
     setCurrent('Y')
     setTimeout(() => {
-      const botMove = chooseBotMove(nextBoard)
+      let botTurnBoard = nextBoard
+      if (mode === 'stealing' && hasStealablePiece(nextBoard)) {
+        const canBotSteal = Math.random() < 0.18
+        if (canBotSteal) {
+          const botStealCell = chooseBotStealCell(nextBoard, 'Y')
+          if (botStealCell) {
+            botTurnBoard = removePieceAndGravity(nextBoard, botStealCell.row, botStealCell.col)
+            setBoard(botTurnBoard)
+            setStealAvailable(false)
+            setStealFlash(true)
+            setStealBannerText("Bot's Turn to Steal")
+            setLastDrop(null)
+            setLastDropSource(null)
+            setStealFallingCells([])
+          }
+        }
+      }
+
+      const botMove = chooseBotMove(botTurnBoard)
       if (botMove === null) {
         setWinner('Draw')
         setScore(prev => getUpdatedScore(prev, 'Draw'))
         return
       }
 
-      const botRow = nextBoard.findIndex((row) => row[botMove] === null)
-      const botNext = dropInColumn(nextBoard, botMove, 'Y')
-      if (!botNext || botRow === -1) {
+      const botRow = getDropRow(botTurnBoard, botMove)
+      const botNext = dropInColumn(botTurnBoard, botMove, 'Y')
+      if (!botNext || botRow === undefined) {
         setWinner('Draw')
         setScore(prev => getUpdatedScore(prev, 'Draw'))
         return
       }
 
+      setBoard(botNext)
       setLastDrop({ col: botMove, row: botRow, player: 'Y' })
       setLastDropSource('bot')
-      setBoard(botNext)
-      // play pop sound for bot drop
       try {
         const s = popAudioRef.current
         if (s) {
@@ -422,6 +502,7 @@ export default function Game({ user }: GameProps) {
           void s.play().catch(() => {})
         }
       } catch {}
+
       const botWin = findWinner(botNext)
       if (botWin) {
         setWinner(botWin)
@@ -440,17 +521,210 @@ export default function Game({ user }: GameProps) {
     }, 350)
   }
 
+  function runTripleBot(currentBoard: BoardState, bot: Player) {
+    const botMove = chooseTripleBotMove(currentBoard, bot)
+    if (botMove === null) {
+      setWinner('Draw')
+      setScore(prev => getUpdatedScore(prev, 'Draw'))
+      return
+    }
+
+    const botRow = getDropRow(currentBoard, botMove)
+    const botNext = dropInColumn(currentBoard, botMove, bot)
+    if (!botNext || botRow === undefined) {
+      setWinner('Draw')
+      setScore(prev => getUpdatedScore(prev, 'Draw'))
+      return
+    }
+
+    setBoard(botNext)
+    setLastDrop({ col: botMove, row: botRow, player: bot })
+    setLastDropSource('bot')
+    try {
+      const sound = popAudioRef.current
+      if (sound) {
+        sound.currentTime = 0
+        void sound.play().catch(() => {})
+      }
+    } catch {}
+
+    const botWin = findWinner(botNext)
+    if (botWin) {
+      setWinner(botWin)
+      setWinningCells(findWinningCells(botNext)?.map(([row, col]) => ({ row, col })) ?? [])
+      setScore(prev => getUpdatedScore(prev, botWin))
+      return
+    }
+
+    if (!hasAvailableMoves(botNext)) {
+      setWinner('Draw')
+      setScore(prev => getUpdatedScore(prev, 'Draw'))
+      return
+    }
+
+    if (bot === 'Y') {
+      setCurrent('B')
+      setTimeout(() => runTripleBot(botNext, 'B'), 350)
+    } else {
+      setCurrent('R')
+    }
+  }
+
+  function chooseBotStealCell(currentBoard: BoardState, bot: Player): { row: number; col: number } | null {
+    const options: Array<{ row: number; col: number }> = []
+    for (let row = 0; row < currentBoard.length; row += 1) {
+      for (let col = 0; col < currentBoard[row].length; col += 1) {
+        const cell = currentBoard[row][col]
+        if (cell && cell !== bot) {
+          options.push({ row, col })
+        }
+      }
+    }
+
+    if (options.length === 0) return null
+    return options[Math.floor(Math.random() * options.length)]
+  }
+
   function hasAvailableMoves(currentBoard: BoardState): boolean {
-    return Array.from({ length: COLUMNS }, (_, index) => index).some((col) => dropInColumn(currentBoard, col, 'R') !== null)
+    return Array.from({ length: columns }, (_, index) => index).some((col) => dropInColumn(currentBoard, col, 'R') !== null)
   }
 
   function getLegalMoves(currentBoard: BoardState): number[] {
-    return Array.from({ length: COLUMNS }, (_, index) => index).filter((col) => dropInColumn(currentBoard, col, 'R') !== null)
+    return Array.from({ length: columns }, (_, index) => index).filter((col) => dropInColumn(currentBoard, col, 'R') !== null)
   }
 
   function isWinningMove(currentBoard: BoardState, col: number, player: Player): boolean {
     const next = dropInColumn(currentBoard, col, player)
     return next ? findWinner(next) === player : false
+  }
+
+  function chooseTripleBotMove(currentBoard: BoardState, bot: Player): number | null {
+    const legalMoves = getLegalMoves(currentBoard)
+    if (legalMoves.length === 0) return null
+
+    if (difficulty === 'easy') {
+      return rememberBotMove(bot, legalMoves[Math.floor(Math.random() * legalMoves.length)])
+    }
+
+    const opponents: Player[] = (['R', 'Y', 'B'] as Player[]).filter((player) => player !== bot)
+    const winningMoves = getWinningMoves(currentBoard, bot)
+    if (winningMoves.length > 0) return rememberBotMove(bot, chooseVariedColumn(winningMoves, bot))
+
+    const opponentWinningMoves = new Set(opponents.flatMap((player) => getWinningMoves(currentBoard, player)))
+    if (opponentWinningMoves.size === 1) {
+      return rememberBotMove(bot, chooseVariedColumn([...opponentWinningMoves], bot))
+    }
+    if (botMoveHistoryRef.current[bot].length === 0) {
+      return rememberBotMove(bot, chooseOpeningMove(currentBoard))
+    }
+
+    const scoredMoves = legalMoves.map((col) => {
+      const nextBoard = dropInColumn(currentBoard, col, bot)!
+      const blocksWin = opponentWinningMoves.has(col)
+      const ownThreats = getWinningMoves(nextBoard, bot).length
+      const opponentThreats = opponents.reduce((total, player) => total + getWinningMoves(nextBoard, player).length, 0)
+      const centerDistance = Math.abs(Math.floor(columns / 2) - col)
+      const score = evaluateTripleBoard(nextBoard, bot, opponents)
+        + (blocksWin ? (difficulty === 'nightmare' ? 100000 : 50000) : 0)
+        + ownThreats * (difficulty === 'nightmare' ? 7000 : 4000)
+        - opponentThreats * (difficulty === 'nightmare' ? 10000 : 6500)
+        - centerDistance * 12
+      return { col, score }
+    })
+
+    return rememberBotMove(bot, chooseVariedScoredMove(scoredMoves, bot, difficulty === 'nightmare' ? 0.02 : difficulty === 'hard' ? 0.04 : 0.08))
+  }
+
+  function getWinningMoves(currentBoard: BoardState, player: Player): number[] {
+    return getLegalMoves(currentBoard).filter((col) => isWinningMove(currentBoard, col, player))
+  }
+
+  function chooseVariedColumn(columnsToChoose: number[], bot: Player): number {
+    const recentMoves = botMoveHistoryRef.current[bot]
+    const freshMoves = columnsToChoose.filter((col) => !recentMoves.includes(col))
+    const choices = freshMoves.length > 0 ? freshMoves : columnsToChoose
+    return choices[Math.floor(Math.random() * choices.length)]
+  }
+
+  function chooseOpeningMove(currentBoard: BoardState): number {
+    const legalMoves = getLegalMoves(currentBoard)
+    const center = Math.floor(columns / 2)
+    const centralMoves = legalMoves.filter((col) => Math.abs(col - center) <= 2)
+    const choices = centralMoves.length > 0 ? centralMoves : legalMoves
+    const selected = choices[openingCursorRef.current % choices.length]
+    openingCursorRef.current += 1
+    return selected
+  }
+
+  function chooseVariedScoredMove(scoredMoves: Array<{ col: number; score: number }>, bot: Player, variationPercent = 0.08): number {
+    const highestScore = Math.max(...scoredMoves.map((move) => move.score))
+    const variationWindow = Math.max(80, Math.abs(highestScore) * variationPercent)
+    const recentMoves = botMoveHistoryRef.current[bot]
+    const candidates = scoredMoves
+      .filter((move) => move.score >= highestScore - variationWindow)
+      .map((move) => ({
+        ...move,
+        adjustedScore: move.score - recentMoves.reduce((penalty, recentCol, index) => (
+          penalty + (recentCol === move.col ? (index === recentMoves.length - 1 ? 180 : 90) : 0)
+        ), 0) + Math.random() * variationWindow * 0.35,
+      }))
+
+    return candidates.reduce((best, move) => move.adjustedScore > best.adjustedScore ? move : best).col
+  }
+
+  function rememberBotMove(bot: Player, col: number): number {
+    botMoveHistoryRef.current[bot] = [...botMoveHistoryRef.current[bot], col].slice(-3)
+    return col
+  }
+
+  function scoreTripleWindow(cells: (Player | null)[], bot: Player, opponents: Player[]): number {
+    const emptyCount = cells.filter((cell) => cell === null).length
+    const botCount = cells.filter((cell) => cell === bot).length
+    const opponentCount = Math.max(...opponents.map((player) => cells.filter((cell) => cell === player).length))
+
+    if (botCount > 0 && opponentCount > 0) return 0
+    if (botCount === 4) return 100000
+    if (botCount === 3 && emptyCount === 1) return 1400
+    if (botCount === 2 && emptyCount === 2) return 100
+    if (opponentCount === 4) return -100000
+    if (opponentCount === 3 && emptyCount === 1) return -1800
+    if (opponentCount === 2 && emptyCount === 2) return -140
+    return 0
+  }
+
+  function evaluateTripleBoard(currentBoard: BoardState, bot: Player, opponents: Player[]): number {
+    let score = 0
+    const addWindow = (cells: (Player | null)[]) => {
+      score += scoreTripleWindow(cells, bot, opponents)
+    }
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
+        addWindow([currentBoard[row][col], currentBoard[row][col + 1], currentBoard[row][col + 2], currentBoard[row][col + 3]])
+      }
+    }
+    for (let col = 0; col < columns; col += 1) {
+      for (let row = 0; row < rows - 3; row += 1) {
+        addWindow([currentBoard[row][col], currentBoard[row + 1][col], currentBoard[row + 2][col], currentBoard[row + 3][col]])
+      }
+    }
+    for (let row = 0; row < rows - 3; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
+        addWindow([currentBoard[row][col], currentBoard[row + 1][col + 1], currentBoard[row + 2][col + 2], currentBoard[row + 3][col + 3]])
+      }
+    }
+    for (let row = 3; row < rows; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
+        addWindow([currentBoard[row][col], currentBoard[row - 1][col + 1], currentBoard[row - 2][col + 2], currentBoard[row - 3][col + 3]])
+      }
+    }
+
+    const centerCol = Math.floor(columns / 2)
+    for (let row = 0; row < rows; row += 1) {
+      if (currentBoard[row][centerCol] === bot) score += 18
+      if (opponents.includes(currentBoard[row][centerCol] as Player)) score -= 12
+    }
+    return score
   }
 
   function scoreWindow(cells: (Player | null)[]): number {
@@ -475,8 +749,8 @@ export default function Game({ user }: GameProps) {
   function evaluateBoard(currentBoard: BoardState): number {
     let score = 0
 
-    for (let row = 0; row < ROWS; row += 1) {
-      for (let col = 0; col < COLUMNS - 3; col += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
         score += scoreWindow([
           currentBoard[row][col],
           currentBoard[row][col + 1],
@@ -486,8 +760,8 @@ export default function Game({ user }: GameProps) {
       }
     }
 
-    for (let col = 0; col < COLUMNS; col += 1) {
-      for (let row = 0; row < ROWS - 3; row += 1) {
+    for (let col = 0; col < columns; col += 1) {
+      for (let row = 0; row < rows - 3; row += 1) {
         score += scoreWindow([
           currentBoard[row][col],
           currentBoard[row + 1][col],
@@ -497,8 +771,8 @@ export default function Game({ user }: GameProps) {
       }
     }
 
-    for (let row = 0; row < ROWS - 3; row += 1) {
-      for (let col = 0; col < COLUMNS - 3; col += 1) {
+    for (let row = 0; row < rows - 3; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
         score += scoreWindow([
           currentBoard[row][col],
           currentBoard[row + 1][col + 1],
@@ -508,8 +782,8 @@ export default function Game({ user }: GameProps) {
       }
     }
 
-    for (let row = 3; row < ROWS; row += 1) {
-      for (let col = 0; col < COLUMNS - 3; col += 1) {
+    for (let row = 3; row < rows; row += 1) {
+      for (let col = 0; col < columns - 3; col += 1) {
         score += scoreWindow([
           currentBoard[row][col],
           currentBoard[row - 1][col + 1],
@@ -519,8 +793,8 @@ export default function Game({ user }: GameProps) {
       }
     }
 
-    const centerCol = Math.floor(COLUMNS / 2)
-    for (let row = 0; row < ROWS; row += 1) {
+    const centerCol = Math.floor(columns / 2)
+    for (let row = 0; row < rows; row += 1) {
       if (currentBoard[row][centerCol] === 'Y') score += 8
       if (currentBoard[row][centerCol] === 'R') score -= 10
     }
@@ -565,25 +839,35 @@ export default function Game({ user }: GameProps) {
     const legalMoves = getLegalMoves(currentBoard)
     if (legalMoves.length === 0) return null
 
+    if (difficulty === 'easy') {
+      return rememberBotMove('Y', legalMoves[Math.floor(Math.random() * legalMoves.length)])
+    }
+
     const winningMoves = legalMoves.filter((col) => isWinningMove(currentBoard, col, 'Y'))
     if (winningMoves.length > 0) {
-      return winningMoves[Math.floor(Math.random() * winningMoves.length)]
+      return rememberBotMove('Y', chooseVariedColumn(winningMoves, 'Y'))
     }
 
     const blockingMoves = legalMoves.filter((col) => isWinningMove(currentBoard, col, 'R'))
     if (blockingMoves.length > 0) {
-      return blockingMoves[Math.floor(Math.random() * blockingMoves.length)]
+      return rememberBotMove('Y', chooseVariedColumn(blockingMoves, 'Y'))
+    }
+    if (botMoveHistoryRef.current.Y.length === 0) {
+      return rememberBotMove('Y', chooseOpeningMove(currentBoard))
     }
 
     const scoredMoves = legalMoves.map((col) => {
       const nextBoard = dropInColumn(currentBoard, col, 'Y')!
-      const score = minimax(nextBoard, 4, -Infinity, Infinity, false)
+      const depth = difficulty === 'nightmare' ? 7 : difficulty === 'hard' ? 5 : 3
+      const score = minimax(nextBoard, depth, -Infinity, Infinity, false)
       return { col, score }
     })
 
-    const highestScore = Math.max(...scoredMoves.map((move) => move.score))
-    const bestMoves = scoredMoves.filter((move) => move.score >= highestScore - 50).map((move) => move.col)
-    return bestMoves[Math.floor(Math.random() * bestMoves.length)]
+    return rememberBotMove('Y', chooseVariedScoredMove(
+      scoredMoves,
+      'Y',
+      difficulty === 'nightmare' ? 0.01 : difficulty === 'hard' ? 0.03 : 0.08,
+    ))
   }
 
   async function reportWin() {
@@ -595,6 +879,7 @@ export default function Game({ user }: GameProps) {
           username: user?.username,
           email: user?.email,
           userId: user?.id,
+          mode: mode === 'triple' ? 'triple' : 'classic',
         }),
       })
     } catch (error) {
@@ -603,14 +888,18 @@ export default function Game({ user }: GameProps) {
   }
 
   function reset() {
-    setBoard(createEmptyBoard(ROWS, COLUMNS))
+    setBoard(createEmptyBoard(rows, columns))
     setCurrent('R')
     setWinner(null)
     setLastDrop(null)
     setWinningCells([])
     setPendingDrop(null)
     setLastDropSource(null)
-    // clear any overlay artifacts and inline styles on cells
+    setStealAvailable(false)
+    setStealFlash(false)
+    setStealFallingCells([])
+    botMoveHistoryRef.current = { R: [], Y: [], B: [] }
+    openingCursorRef.current = 0
     if (meltOverlayRef.current) {
       meltOverlayRef.current.style.display = 'none'
       const layer = cloneLayerRef.current
@@ -630,13 +919,67 @@ export default function Game({ user }: GameProps) {
     }
   }
 
+  const resultOverlay = winner === 'R'
+    ? 'win-overlay'
+    : winner === 'Draw'
+      ? 'draw-overlay'
+      : winner
+        ? 'loss-overlay'
+        : null
+
   return (
-    <div className="game">
+    <div className={`game ${mode === 'triple' ? 'triple-mode' : ''}`}>
+      {stealFlash && (
+        <div className={`steal-banner ${stealBannerText === "Bot's Turn to Steal" ? 'bot-steal-banner' : ''}`} aria-live="assertive" role="status">
+          {stealBannerText}
+        </div>
+      )}
+      {resultOverlay && (
+        <div className={`result-overlay ${resultOverlay}`} aria-live="assertive" role="status">
+          {winner === 'R' && (
+            <div className="confetti" aria-hidden="true">
+              {confettiPieces.map((piece, index) => (
+                <span
+                  className="confetti-piece"
+                  key={index}
+                  style={{
+                    left: piece.left,
+                    animationDelay: piece.delay,
+                    animationDuration: piece.duration,
+                    backgroundColor: piece.color,
+                    '--confetti-rotation': piece.rotation,
+                  } as React.CSSProperties}
+                />
+              ))}
+            </div>
+          )}
+          {winner === 'R' && <strong className="result-message win-message">You win!</strong>}
+          {winner !== 'R' && winner !== 'Draw' && <strong className="result-message loss-message">Dang you lost against a bot</strong>}
+          {winner === 'Draw' && <strong className="result-message draw-message">=</strong>}
+        </div>
+      )}
       <div className="game-header">
         <div className="status">
-          {winner ? (winner === 'Draw' ? 'Draw!' : `${winner} wins!`) : `Turn: ${current}`}
+          {winner ? (winner === 'Draw' ? 'Draw!' : `${winner === 'R' ? 'Red' : winner === 'Y' ? 'Yellow' : 'Blue'} wins!`) : `Turn: ${current === 'R' ? 'Red' : current === 'Y' ? 'Yellow' : 'Blue'}`}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="game-header-actions">
+          <label className="mode-control">
+            <span>Mode</span>
+            <select value={mode} onChange={(event) => changeMode(event.target.value as GameMode)}>
+              <option value="classic">Classic</option>
+              <option value="triple">Triple</option>
+              <option value="stealing">Stealing</option>
+            </select>
+          </label>
+          <label className="difficulty-control">
+            <span>Difficulty</span>
+            <select value={difficulty} onChange={(event) => setDifficulty(event.target.value as Difficulty)}>
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+              <option value="nightmare">Nightmare</option>
+            </select>
+          </label>
           <div className="sfx-controls" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               aria-label={sfxMuted ? 'Unmute sound effects' : 'Mute sound effects'}
@@ -670,13 +1013,19 @@ export default function Game({ user }: GameProps) {
           <span className="score-label">Yellow</span>
           <strong>{score.Y}</strong>
         </div>
+        {mode === 'triple' && (
+          <div className="score-pill blue">
+            <span className="score-label">Blue</span>
+            <strong>{score.B}</strong>
+          </div>
+        )}
         <div className="score-pill draw">
           <span className="score-label">Draws</span>
           <strong>{score.Draw}</strong>
         </div>
       </div>
       <div className="board" role="grid" ref={boardRef}>
-        {Array.from({ length: COLUMNS }).map((_, col) => (
+        {Array.from({ length: columns }).map((_, col) => (
           <div
             key={col}
             className="column"
@@ -691,20 +1040,34 @@ export default function Game({ user }: GameProps) {
             }}
             aria-label={`Drop piece in column ${col + 1}`}
           >
-            {Array.from({ length: ROWS }).map((_, rowIdx) => {
-              const row = ROWS - 1 - rowIdx
+            {Array.from({ length: rows }).map((_, rowIdx) => {
+              const row = rowIdx
               const cell = board[row][col]
               const isLastDrop = lastDrop?.col === col && lastDrop?.row === row
               const isWinningPiece = winningCells.some((win) => win.row === row && win.col === col)
-              const dropDistance = ROWS - 1 - row
+              const isStealable = mode === 'stealing' && stealAvailable && !!board[row]?.[col] && board[row][col] !== 'R'
+              const fallingCell = stealFallingCells.find((fall) => fall.toRow === row && fall.col === col)
+              const isStealFall = Boolean(fallingCell)
+              const dropDistance = row
               const animateClass = isLastDrop && lastDropSource === 'bot' ? 'animate-drop' : ''
+              const cellStyle = isStealFall
+                ? ({ '--drop-distance': `${Math.max(1, fallingCell!.toRow - fallingCell!.fromRow) * 56}px` } as React.CSSProperties)
+                : animateClass
+                  ? ({ '--drop-distance': `${dropDistance * 56}px` } as React.CSSProperties)
+                  : undefined
               return (
                 <div
-                  className={`cell ${cell || ''} ${animateClass} ${isWinningPiece ? 'win' : ''}`}
+                  className={`cell ${cell || ''} ${animateClass} ${isWinningPiece ? 'win' : ''} ${isStealable ? 'stealable' : ''} ${isStealFall ? 'steal-fall' : ''}`}
                   key={col + '-' + row}
-                  style={animateClass ? { '--drop-distance': `${dropDistance * 56}px` } as React.CSSProperties : undefined}
+                  style={cellStyle}
                   data-row={row}
                   data-col={col}
+                  onClick={(event) => {
+                    if (mode === 'stealing' && stealAvailable && isStealable) {
+                      event.stopPropagation()
+                      handleCellClick(row, col)
+                    }
+                  }}
                 />
               )
             })}
@@ -717,24 +1080,29 @@ export default function Game({ user }: GameProps) {
           <svg className="molten-bar" ref={moltenSvgRef} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 56" preserveAspectRatio="none">
             <defs>
               <linearGradient id="moltenGradR" x1="0%" x2="100%" y1="0%" y2="0%">
-                <stop offset="0%" stopColor="#fff5f5" stopOpacity="0.9" />
-                <stop offset="45%" stopColor="#ff9b9b" stopOpacity="1" />
-                <stop offset="100%" stopColor="#ff3b3b" stopOpacity="1" />
+                <stop offset="0%" stopColor="#ffb5b5"/>
+                <stop offset="45%" stopColor="#ff3b3b"/>
+                <stop offset="100%" stopColor="#c70000"/>
               </linearGradient>
               <linearGradient id="moltenGradY" x1="0%" x2="100%" y1="0%" y2="0%">
-                <stop offset="0%" stopColor="#fffdf2" stopOpacity="0.95" />
-                <stop offset="45%" stopColor="#ffe48a" stopOpacity="1" />
-                <stop offset="100%" stopColor="#ffd845" stopOpacity="1" />
+                <stop offset="0%" stopColor="#fff8b8"/>
+                <stop offset="45%" stopColor="#ffd845"/>
+                <stop offset="100%" stopColor="#d69d00"/>
               </linearGradient>
-              <filter id="moltenGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="8" result="blur" />
+              <linearGradient id="moltenGradB" x1="0%" x2="100%" y1="0%" y2="0%">
+                <stop offset="0%" stopColor="#dff5ff"/>
+                <stop offset="45%" stopColor="#4db8f2"/>
+                <stop offset="100%" stopColor="#0f7ecb"/>
+              </linearGradient>
+              <filter id="moltenGlow">
+                <feGaussianBlur stdDeviation="1.5" result="blur"/>
                 <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
             </defs>
-            <rect ref={moltenRef} x="0" y="0" width="100%" height="100%" rx="9999" ry="9999" fill="url(#moltenGradR)" />
+            <rect ref={moltenRef} x="0" y="0" width="100" height="28" rx="14" ry="14"/>
           </svg>
         </div>
       </div>

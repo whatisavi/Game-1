@@ -15,9 +15,11 @@ export default function App() {
   const [view, setView] = useState<View>('home')
   const [user, setUser] = useState<User | null>(null)
   const [leaderboard, setLeaderboard] = useState<Array<{ id: string; username: string; win: number }>>([])
+  const [tripleLeaderboard, setTripleLeaderboard] = useState<Array<{ id: string; username: string; win: number }>>([])
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null)
   const [leaderboardOpen, setLeaderboardOpen] = useState(false)
+  const [tripleLeaderboardOpen, setTripleLeaderboardOpen] = useState(false)
 
   useEffect(() => {
     const savedUser = localStorage.getItem('auth_user')
@@ -44,12 +46,12 @@ export default function App() {
     setView('home')
   }
 
-  async function fetchLeaderboard() {
+  async function fetchLeaderboard(mode: 'classic' | 'triple') {
     setLeaderboardError(null)
     setLoadingLeaderboard(true)
 
     try {
-      const response = await fetch('/api/game/leaderboard')
+      const response = await fetch(`/api/game/leaderboard?mode=${mode}`)
       if (!response.ok) {
         const errorData = await response.json().catch(() => null)
         throw new Error(errorData?.error || 'Could not load leaderboard')
@@ -68,11 +70,13 @@ export default function App() {
                 ? data.data
                 : []
 
-      setLeaderboard(rawEntries.map((entry: any) => ({
+      const entries = rawEntries.map((entry: any) => ({
         id: String(entry?.id ?? entry?.ID ?? ''),
         username: String(entry?.username ?? entry?.USERNAME ?? ''),
         win: Number(entry?.win ?? entry?.WIN ?? 0),
-      })))
+      }))
+      if (mode === 'triple') setTripleLeaderboard(entries)
+      else setLeaderboard(entries)
     } catch (err: any) {
       setLeaderboardError(String(err?.message || err))
     } finally {
@@ -80,12 +84,16 @@ export default function App() {
     }
   }
 
-  function handleToggleLeaderboard() {
+  function handleToggleLeaderboard(mode: 'classic' | 'triple') {
+    if (mode === 'triple') {
+      const nextOpen = !tripleLeaderboardOpen
+      setTripleLeaderboardOpen(nextOpen)
+      if (nextOpen && tripleLeaderboard.length === 0) void fetchLeaderboard('triple')
+      return
+    }
     const nextOpen = !leaderboardOpen
     setLeaderboardOpen(nextOpen)
-    if (nextOpen && leaderboard.length === 0) {
-      void fetchLeaderboard()
-    }
+    if (nextOpen && leaderboard.length === 0) void fetchLeaderboard('classic')
   }
 
   return (
@@ -148,8 +156,11 @@ export default function App() {
                 <h3>{user?.username || 'Player'}</h3>
                 <p>{user?.email || 'Signed in and ready to play'}</p>
               </div>
-              <button className="primary-cta leaderboard-toggle-button" onClick={handleToggleLeaderboard}>
+              <button className="primary-cta leaderboard-toggle-button" onClick={() => handleToggleLeaderboard('classic')}>
                 {leaderboardOpen ? 'Hide leaderboard' : 'Show leaderboard'}
+              </button>
+              <button className="secondary-btn leaderboard-toggle-button" onClick={() => handleToggleLeaderboard('triple')}>
+                {tripleLeaderboardOpen ? 'Hide 1v1v1 leaderboard' : 'Show 1v1v1 leaderboard'}
               </button>
               {leaderboardOpen && (
                 <section className="leaderboard-box">
@@ -166,6 +177,30 @@ export default function App() {
                   ) : (
                     <ol className="sidebar-leaderboard-list">
                       {leaderboard.map((entry) => (
+                        <li key={entry.id}>
+                          <span>{entry.username}</span>
+                          <strong>{entry.win}</strong>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              )}
+              {tripleLeaderboardOpen && (
+                <section className="leaderboard-box triple-leaderboard-box">
+                  <div className="leaderboard-box-header">
+                    <span>1v1v1 Leaderboard</span>
+                    <small>Top wins</small>
+                  </div>
+                  {loadingLeaderboard ? (
+                    <p>Loading...</p>
+                  ) : leaderboardError ? (
+                    <p className="error">{leaderboardError}</p>
+                  ) : tripleLeaderboard.length === 0 ? (
+                    <p>No entries yet.</p>
+                  ) : (
+                    <ol className="sidebar-leaderboard-list">
+                      {tripleLeaderboard.map((entry) => (
                         <li key={entry.id}>
                           <span>{entry.username}</span>
                           <strong>{entry.win}</strong>
