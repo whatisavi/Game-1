@@ -4,6 +4,7 @@
 ## Link
 https://game-1.sonic808598.workers.dev/ 
 
+## How to Run
 Vite + React + TypeScript implementation of Connect Four.
 
 Quick start
