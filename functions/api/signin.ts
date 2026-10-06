@@ -1,3 +1,5 @@
+import { createAdminToken } from "../../src/lib/adminAuth";
+
 interface Env {
   DB: any;
 }
@@ -51,9 +53,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     await ensurePasswordColumn(env.DB);
-
     const user: any = await env.DB.prepare(
-      "SELECT id, username, email, password FROM users WHERE username = ?1 OR email = ?2 LIMIT 1"
+      "SELECT id, username, email, password, isAdmin FROM users WHERE username = ?1 OR email = ?2 LIMIT 1"
     )
       .bind(loginIdentifier, loginIdentifier)
       .first();
@@ -74,12 +75,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
+    const isAdmin = Number(user.isAdmin) === 1;
+    const adminToken = isAdmin ? await createAdminToken(user.id, user.password) : undefined;
+
     return new Response(
-      JSON.stringify({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-      }),
+      JSON.stringify({ id: user.id, username: user.username, email: user.email, isAdmin, adminToken }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (err: any) {

@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/favicon-32x32.png" />
     <title>Connect Four</title>
+    <script>
+      try {
+        if (localStorage.getItem('app_theme') === 'light') {
+          document.documentElement.classList.add('light-theme');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

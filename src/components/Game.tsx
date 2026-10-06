@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { animate } from 'motion'
-import { createEmptyBoard, dropInColumn, findWinner, findWinningCells, getUpdatedScore, removePieceAndGravity, getDropRow, hasStealablePiece, BoardState, Player, Scoreboard } from '../lib/game'
+import { createEmptyBoard, dropInColumn, findWinner, findWinningCells, getUpdatedScore, removePieceAndGravity, getDropRow, hasStealablePiece, getWinnerForMode, BoardState, GameMode, Player, Scoreboard } from '../lib/game'
 
 type GameProps = {
   user?: { id?: string; username?: string; email?: string; wins?: number }
+  initialMode?: GameMode
+  onBackHome?: () => void
 }
 
 const confettiPieces = Array.from({ length: 72 }, (_, index) => ({
@@ -14,11 +16,17 @@ const confettiPieces = Array.from({ length: 72 }, (_, index) => ({
   rotation: `${(index % 2 ? 1 : -1) * (18 + (index % 5) * 12)}deg`,
 }))
 
-type GameMode = 'classic' | 'triple' | 'stealing'
 type Difficulty = 'easy' | 'medium' | 'hard' | 'nightmare'
 
-export default function Game({ user }: GameProps) {
-  const [mode, setMode] = useState<GameMode>('classic')
+function getModeLabel(mode: GameMode): string {
+  if (mode === 'anti-connect') return "Don't Connect Four"
+  if (mode === 'triple') return 'Triple'
+  if (mode === 'stealing') return 'Stealing'
+  return 'Classic'
+}
+
+export default function Game({ user, initialMode = 'classic', onBackHome }: GameProps) {
+  const [mode, setMode] = useState<GameMode>(initialMode)
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
   const [stealAvailable, setStealAvailable] = useState<boolean>(false)
   const [stealFlash, setStealFlash] = useState<boolean>(false)
@@ -47,6 +55,7 @@ export default function Game({ user }: GameProps) {
   const [sfxMuted, setSfxMuted] = useState<boolean>(false)
   const botMoveHistoryRef = useRef<Record<Player, number[]>>({ R: [], Y: [], B: [] })
   const openingCursorRef = useRef(0)
+  const moveCountRef = useRef(0)
 
   function handleDrop(col: number) {
     if (winner || current !== 'R' || pendingDrop) return
@@ -112,6 +121,7 @@ export default function Game({ user }: GameProps) {
     setStealAvailable(false)
     setStealFlash(false)
     setStealFallingCells([])
+    moveCountRef.current = 0
     botMoveHistoryRef.current = { R: [], Y: [], B: [] }
   }
 
@@ -222,6 +232,7 @@ export default function Game({ user }: GameProps) {
         droplet.style.opacity = '0'
         droplet.textContent = ''
         setBoard(pendingDrop.nextBoard)
+        moveCountRef.current += 1
         setLastDrop({ col: pendingDrop.col, row: pendingDrop.row, player: pendingDrop.player })
         setLastDropSource(pendingDrop.source)
         setPendingDrop(null)
@@ -425,20 +436,22 @@ export default function Game({ user }: GameProps) {
   function handlePostUserMove(nextBoard: BoardState) {
     const w = findWinner(nextBoard)
     if (w) {
-      setWinner(w)
+      const result = getWinnerForMode(w, mode)
+      setWinner(result)
       setWinningCells(findWinningCells(nextBoard)?.map(([row, col]) => ({ row, col })) ?? [])
-      setScore(prev => getUpdatedScore(prev, w))
-      if (w === 'R') void reportWin()
+      setScore(prev => getUpdatedScore(prev, result))
+      void reportGameResult(result === 'R' ? 'win' : 'loss')
       return
     }
 
     if (!hasAvailableMoves(nextBoard)) {
       setWinner('Draw')
       setScore(prev => getUpdatedScore(prev, 'Draw'))
+      void reportGameResult('draw')
       return
     }
 
-    if (mode === 'stealing' && hasStealablePiece(nextBoard)) {
+    if (mode === 'stealing' && moveCountRef.current >= 8 && hasStealablePiece(nextBoard)) {
       const canSteal = Math.random() < 0.18
       if (canSteal) {
         setLastDrop(null)
@@ -460,7 +473,7 @@ export default function Game({ user }: GameProps) {
     setCurrent('Y')
     setTimeout(() => {
       let botTurnBoard = nextBoard
-      if (mode === 'stealing' && hasStealablePiece(nextBoard)) {
+      if (mode === 'stealing' && moveCountRef.current >= 8 && hasStealablePiece(nextBoard)) {
         const canBotSteal = Math.random() < 0.18
         if (canBotSteal) {
           const botStealCell = chooseBotStealCell(nextBoard, 'Y')
@@ -481,6 +494,7 @@ export default function Game({ user }: GameProps) {
       if (botMove === null) {
         setWinner('Draw')
         setScore(prev => getUpdatedScore(prev, 'Draw'))
+        void reportGameResult('draw')
         return
       }
 
@@ -489,10 +503,12 @@ export default function Game({ user }: GameProps) {
       if (!botNext || botRow === undefined) {
         setWinner('Draw')
         setScore(prev => getUpdatedScore(prev, 'Draw'))
+        void reportGameResult('draw')
         return
       }
 
       setBoard(botNext)
+      moveCountRef.current += 1
       setLastDrop({ col: botMove, row: botRow, player: 'Y' })
       setLastDropSource('bot')
       try {
@@ -505,15 +521,18 @@ export default function Game({ user }: GameProps) {
 
       const botWin = findWinner(botNext)
       if (botWin) {
-        setWinner(botWin)
+        const result = getWinnerForMode(botWin, mode)
+        setWinner(result)
         setWinningCells(findWinningCells(botNext)?.map(([row, col]) => ({ row, col })) ?? [])
-        setScore(prev => getUpdatedScore(prev, botWin))
+        setScore(prev => getUpdatedScore(prev, result))
+        void reportGameResult(result === 'R' ? 'win' : 'loss')
         return
       }
 
       if (!hasAvailableMoves(botNext)) {
         setWinner('Draw')
         setScore(prev => getUpdatedScore(prev, 'Draw'))
+        void reportGameResult('draw')
         return
       }
 
@@ -526,6 +545,7 @@ export default function Game({ user }: GameProps) {
     if (botMove === null) {
       setWinner('Draw')
       setScore(prev => getUpdatedScore(prev, 'Draw'))
+      void reportGameResult('draw')
       return
     }
 
@@ -534,6 +554,7 @@ export default function Game({ user }: GameProps) {
     if (!botNext || botRow === undefined) {
       setWinner('Draw')
       setScore(prev => getUpdatedScore(prev, 'Draw'))
+      void reportGameResult('draw')
       return
     }
 
@@ -550,15 +571,18 @@ export default function Game({ user }: GameProps) {
 
     const botWin = findWinner(botNext)
     if (botWin) {
-      setWinner(botWin)
+      const result = getWinnerForMode(botWin, mode)
+      setWinner(result)
       setWinningCells(findWinningCells(botNext)?.map(([row, col]) => ({ row, col })) ?? [])
-      setScore(prev => getUpdatedScore(prev, botWin))
+      setScore(prev => getUpdatedScore(prev, result))
+      void reportGameResult(result === 'R' ? 'win' : 'loss')
       return
     }
 
     if (!hasAvailableMoves(botNext)) {
       setWinner('Draw')
       setScore(prev => getUpdatedScore(prev, 'Draw'))
+      void reportGameResult('draw')
       return
     }
 
@@ -843,6 +867,17 @@ export default function Game({ user }: GameProps) {
       return rememberBotMove('Y', legalMoves[Math.floor(Math.random() * legalMoves.length)])
     }
 
+    if (mode === 'anti-connect') {
+      const scoredMoves = legalMoves.map((col) => {
+        const nextBoard = dropInColumn(currentBoard, col, 'Y')!
+        const redThreats = getWinningMoves(nextBoard, 'R').length
+        const yellowThreats = getWinningMoves(nextBoard, 'Y').length
+        return { col, score: redThreats * 10000 - yellowThreats * 10000 }
+      })
+
+      return rememberBotMove('Y', chooseVariedScoredMove(scoredMoves, 'Y', 0.08))
+    }
+
     const winningMoves = legalMoves.filter((col) => isWinningMove(currentBoard, col, 'Y'))
     if (winningMoves.length > 0) {
       return rememberBotMove('Y', chooseVariedColumn(winningMoves, 'Y'))
@@ -870,7 +905,7 @@ export default function Game({ user }: GameProps) {
     ))
   }
 
-  async function reportWin() {
+  async function reportGameResult(result: 'win' | 'loss' | 'draw') {
     try {
       await fetch('/api/game/win', {
         method: 'POST',
@@ -879,7 +914,8 @@ export default function Game({ user }: GameProps) {
           username: user?.username,
           email: user?.email,
           userId: user?.id,
-          mode: mode === 'triple' ? 'triple' : 'classic',
+          mode,
+          result,
         }),
       })
     } catch (error) {
@@ -898,6 +934,7 @@ export default function Game({ user }: GameProps) {
     setStealAvailable(false)
     setStealFlash(false)
     setStealFallingCells([])
+    moveCountRef.current = 0
     botMoveHistoryRef.current = { R: [], Y: [], B: [] }
     openingCursorRef.current = 0
     if (meltOverlayRef.current) {
@@ -963,43 +1000,8 @@ export default function Game({ user }: GameProps) {
           {winner ? (winner === 'Draw' ? 'Draw!' : `${winner === 'R' ? 'Red' : winner === 'Y' ? 'Yellow' : 'Blue'} wins!`) : `Turn: ${current === 'R' ? 'Red' : current === 'Y' ? 'Yellow' : 'Blue'}`}
         </div>
         <div className="game-header-actions">
-          <label className="mode-control">
-            <span>Mode</span>
-            <select value={mode} onChange={(event) => changeMode(event.target.value as GameMode)}>
-              <option value="classic">Classic</option>
-              <option value="triple">Triple</option>
-              <option value="stealing">Stealing</option>
-            </select>
-          </label>
-          <label className="difficulty-control">
-            <span>Difficulty</span>
-            <select value={difficulty} onChange={(event) => setDifficulty(event.target.value as Difficulty)}>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-              <option value="nightmare">Nightmare</option>
-            </select>
-          </label>
-          <div className="sfx-controls" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              aria-label={sfxMuted ? 'Unmute sound effects' : 'Mute sound effects'}
-              onClick={() => setSfxMuted((v) => !v)}
-              className="mute-btn"
-              type="button"
-            >
-              {sfxMuted ? '🔇' : '🔊'}
-            </button>
-            <input
-              aria-label="Sound effects volume"
-              className="sfx-slider"
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={sfxVolume}
-              onChange={(e) => setSfxVolume(Number((e.target as HTMLInputElement).value))}
-            />
-          </div>
+          <span className="game-mode-badge">{getModeLabel(mode)}</span>
+          <button className="back-home-btn" onClick={onBackHome}>Back to Homescreen</button>
           <button className="restart-btn" onClick={reset}>Restart</button>
         </div>
       </div>

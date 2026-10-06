@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createEmptyBoard, dropInColumn, findWinner, getUpdatedScore, removePieceAndGravity, getDropRow, BoardState } from './game'
+import { createEmptyBoard, dropInColumn, findWinner, getUpdatedScore, removePieceAndGravity, getDropRow, getWinnerForMode, BoardState } from './game'
 
 describe('connect four game logic', () => {
   it('drops pieces into the lowest empty slot', () => {
@@ -49,6 +49,12 @@ describe('connect four game logic', () => {
     expect(getUpdatedScore({ R: 0, Y: 0, B: 0, Draw: 0 }, 'R')).toEqual({ R: 1, Y: 0, B: 0, Draw: 0 })
     expect(getUpdatedScore({ R: 1, Y: 0, B: 0, Draw: 0 }, 'Y')).toEqual({ R: 1, Y: 1, B: 0, Draw: 0 })
     expect(getUpdatedScore({ R: 1, Y: 0, B: 0, Draw: 0 }, 'Draw')).toEqual({ R: 1, Y: 0, B: 0, Draw: 0 })
+  })
+
+  it('reverses the connected player in anti-connect mode', () => {
+    expect(getWinnerForMode('R', 'anti-connect')).toBe('Y')
+    expect(getWinnerForMode('Y', 'anti-connect')).toBe('R')
+    expect(getWinnerForMode('R', 'classic')).toBe('R')
   })
 
   it('finds the actual cell row where a piece would land in a column', () => {

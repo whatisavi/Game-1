@@ -2,6 +2,7 @@ export type Player = 'R' | 'Y' | 'B'
 export type Cell = Player | null
 export type BoardState = Cell[][]
 export type Scoreboard = Record<Player | 'Draw', number>
+export type GameMode = 'classic' | 'triple' | 'stealing' | 'anti-connect'
 
 export function createEmptyBoard(rows: number, cols: number): BoardState {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => null))
@@ -87,6 +88,11 @@ export function findWinner(board: BoardState): Player | null {
     }
   }
   return null
+}
+
+export function getWinnerForMode(connectedPlayer: Player, mode: GameMode): Player {
+  if (mode !== 'anti-connect') return connectedPlayer
+  return connectedPlayer === 'R' ? 'Y' : 'R'
 }
 
 export function getUpdatedScore(score: Scoreboard, result: Player | 'Draw'): Scoreboard {

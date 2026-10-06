@@ -5,13 +5,16 @@ type AuthUser = {
   username: string
   email: string
   wins?: number
+  isAdmin?: boolean
+  adminToken?: string
 }
 
 type SignupProps = {
   onAuthenticated?: (user: AuthUser) => void
+  adminOnly?: boolean
 }
 
-export default function Signup({ onAuthenticated }: SignupProps) {
+export default function Signup({ onAuthenticated, adminOnly = false }: SignupProps) {
   const [isSignUp, setIsSignUp] = useState(false) // toggle between Sign In and Sign Up
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -24,6 +27,7 @@ export default function Signup({ onAuthenticated }: SignupProps) {
 
   // Load user session on mount
   useEffect(() => {
+    if (adminOnly) return
     const savedUser = localStorage.getItem('auth_user')
     if (savedUser) {
       try {
@@ -63,6 +67,11 @@ export default function Signup({ onAuthenticated }: SignupProps) {
         throw new Error(message)
       }
 
+      const isAdmin = data.isAdmin === true || Number(data.isAdmin) === 1
+      if (adminOnly && (!isAdmin || !data.adminToken)) {
+        throw new Error('This account does not have admin access.')
+      }
+
       // Success
       if (isSignUp) {
         setMessage({ text: 'Account created successfully! Please sign in.', isError: false })
@@ -70,7 +79,14 @@ export default function Signup({ onAuthenticated }: SignupProps) {
         setPassword('')
         setEmail('')
       } else {
-        const loggedInUser = { id: data.id, username: data.username, email: data.email, wins: data.wins ?? 0 }
+        const loggedInUser = {
+          id: data.id,
+          username: data.username,
+          email: data.email,
+          wins: data.wins ?? 0,
+          isAdmin,
+          adminToken: data.adminToken,
+        }
         setUser(loggedInUser)
         localStorage.setItem('auth_user', JSON.stringify(loggedInUser))
         onAuthenticated?.(loggedInUser)
@@ -118,13 +134,13 @@ export default function Signup({ onAuthenticated }: SignupProps) {
         >
           Sign In
         </button>
-        <button 
+        {!adminOnly && <button
           type="button" 
           className={`tab-btn ${isSignUp ? 'active' : ''}`}
           onClick={() => { setIsSignUp(true); setMessage(null); }}
         >
           Sign Up
-        </button>
+        </button>}
       </div>
 
       <form onSubmit={handleSubmit} className="auth-form">
