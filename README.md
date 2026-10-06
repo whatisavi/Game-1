@@ -1,5 +1,9 @@
 # Connect Four
 
+**This Connect Four has multiple gamemodes, NOT just the classic. Choose between Classic, Triple, Stealing, and Anti Connect Four. And have fun with this Connect Four with a twist :)**
+## Link
+https://game-1.sonic808598.workers.dev/ 
+
 Vite + React + TypeScript implementation of Connect Four.
 
 Quick start
